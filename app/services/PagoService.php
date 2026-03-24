@@ -29,12 +29,10 @@ class PagoService
         $pendiente = $totalEsperado - $cobrado;
         if ($pendiente < 0) $pendiente = 0;
 
-        // Reservas con deuda (han pagado algo pero no todo, o nada)
         $reservasConDeuda = DB::table('reservas')
             ->whereRaw('precio_total_viaje > (SELECT COALESCE(SUM(monto_depositado), 0) FROM pagos WHERE pagos.reserva_id = reservas.id)')
             ->count();
 
-        // Sin iniciar (0 pagos)
         $sinIniciar = DB::table('reservas')
             ->whereRaw('NOT EXISTS (SELECT 1 FROM pagos WHERE pagos.reserva_id = reservas.id)')
             ->get();
@@ -43,25 +41,26 @@ class PagoService
         $criticaId = $sinIniciar->first() ? $sinIniciar->first()->id : null;
 
         return [
-            'total_pagos' => $totalPagos,
-            'total_trx' => $totalTrx,
-            'cobrado' => $cobrado,
-            'tasa_cobro' => $tasaCobro,
-            'pendiente' => $pendiente,
-            'reservas_deuda' => $reservasConDeuda,
-            'sin_iniciar_monto' => $sinIniciarMonto,
-            'reserva_critica' => $criticaId
+            'total_pagos'      => $totalPagos,
+            'total_trx'        => $totalTrx,
+            'cobrado'          => $cobrado,
+            'tasa_cobro'       => $tasaCobro,
+            'pendiente'        => $pendiente,
+            'reservas_deuda'   => $reservasConDeuda,
+            'sin_iniciar_monto'=> $sinIniciarMonto,
+            'reserva_critica'  => $criticaId
         ];
     }
 
     public function getListaReservas($filtros = [])
     {
-        $query = Reserva::with(['cliente', 'pago', 'grupo.clientes']);
-
-        $reservas = $query->orderBy('created_at', 'desc')->get();
+        // Usamos reservaGrupo para la relación correcta (tabla pivote reservas_grupos)
+        $reservas = Reserva::with(['cliente', 'pago', 'reservaGrupo.grupo'])
+            ->orderBy('created_at', 'desc')
+            ->get();
 
         $lista = $reservas->map(function ($r) {
-            $pagado = $r->pago->sum('monto_depositado');
+            $pagado   = $r->pago->sum('monto_depositado');
             $pendiente = $r->precio_total_viaje - $pagado;
             if ($pendiente < 0) $pendiente = 0;
 
@@ -78,27 +77,31 @@ class PagoService
 
             $ultimo_pago = $r->pago->sortByDesc('fecha_pago')->first();
 
-            $cliente_grupo_nombre = $r->tipo == 'grupal' && $r->grupo 
-                ? $r->grupo->nombre_grupo 
-                : ($r->cliente ? $r->cliente->nombre . ' ' . $r->cliente->apellido : 'Desconocido');
+            // Nombre del cliente o grupo usando la relación reservaGrupo->grupo
+            if ($r->tipo == 'grupal' && $r->reservaGrupo && $r->reservaGrupo->grupo) {
+                $cliente_grupo_nombre = $r->reservaGrupo->grupo->nombre_grupo;
+            } else {
+                $cliente_grupo_nombre = $r->cliente
+                    ? $r->cliente->nombres . ' ' . $r->cliente->apellidos
+                    : 'Desconocido';
+            }
 
             return [
-                'reserva_id' => $r->id,
-                'codigo_reserva' => $r->codigo_reserva,
-                'tipo' => $r->tipo,
-                'cliente_grupo' => $cliente_grupo_nombre,
-                'pagado' => $pagado,
-                'pendiente' => $pendiente,
-                'precio_total' => $r->precio_total_viaje,
-                'metodo' => $ultimo_pago ? ucfirst($ultimo_pago->metodo_pago) : '-',
+                'reserva_id'        => $r->id,
+                'codigo_reserva'    => $r->codigo_reserva,
+                'tipo'              => $r->tipo,
+                'cliente_grupo'     => $cliente_grupo_nombre,
+                'pagado'            => $pagado,
+                'pendiente'         => $pendiente,
+                'precio_total'      => $r->precio_total_viaje,
+                'metodo'            => $ultimo_pago ? ucfirst($ultimo_pago->metodo_pago) : '-',
                 'fecha_ultimo_pago' => $ultimo_pago ? Carbon::parse($ultimo_pago->fecha_pago)->format('Y-m-d') : '-',
-                'estado' => $estado_calculado,
-                'porcentaje' => $porcentaje,
-                'id_ultimo_pago' => $ultimo_pago ? $ultimo_pago->id : null
+                'estado'            => $estado_calculado,
+                'porcentaje'        => $porcentaje,
+                'id_ultimo_pago'    => $ultimo_pago ? $ultimo_pago->id : null
             ];
         });
 
-        // Aplicar filtros en memoria si es necesario
         if (!empty($filtros['estado']) && $filtros['estado'] != 'todos') {
             $estadoFiltro = strtolower($filtros['estado']);
             $lista = $lista->filter(function($row) use ($estadoFiltro) {
@@ -118,25 +121,31 @@ class PagoService
 
     public function getDesgloseGrupal($reserva_id)
     {
-        $reserva = Reserva::with(['grupo', 'pago'])->findOrFail($reserva_id);
+        // Usamos la relación reservaGrupo (tabla pivote reservas_grupos) para obtener el grupo
+        $reserva = Reserva::with(['reservaGrupo.grupo', 'pago'])->findOrFail($reserva_id);
         
-        if ($reserva->tipo !== 'grupal' || !$reserva->grupo) {
+        if ($reserva->tipo !== 'grupal' || !$reserva->reservaGrupo || !$reserva->reservaGrupo->grupo) {
             return [];
         }
 
-        $grupo_id = $reserva->grupo->id;
+        $grupo_id = $reserva->reservaGrupo->grupo_id;
         
-        // Obtener los clientes del grupo desde la tabla pivote correcta
-        // Ya que ReservaService usa grupos_clientes, consultaremos directo para estar seguros
+        // Obtener los clientes del grupo desde la tabla grupos_clientes
         $integrantes = DB::table('grupos_clientes')
             ->join('clientes', 'grupos_clientes.cliente_id', '=', 'clientes.id')
             ->where('grupos_clientes.grupo_id', $grupo_id)
-            ->select('clientes.id', 'clientes.nombre', 'clientes.apellido', 'grupos_clientes.monto_asignado', 'grupos_clientes.es_lider')
+            ->select(
+                'clientes.id',
+                'clientes.nombres',
+                'clientes.apellidos',
+                'grupos_clientes.monto_asignado',
+                'grupos_clientes.es_lider'
+            )
             ->get();
 
         $desglose = $integrantes->map(function ($integrante) use ($reserva) {
             $pagos_cliente = $reserva->pago->where('cliente_id', $integrante->id)->sum('monto_depositado');
-            $asignado = $integrante->monto_asignado ?? 0;
+            $asignado  = $integrante->monto_asignado ?? 0;
             $pendiente = $asignado - $pagos_cliente;
             if ($pendiente < 0) $pendiente = 0;
 
@@ -148,13 +157,13 @@ class PagoService
             }
 
             return [
-                'cliente_id' => $integrante->id,
-                'nombre_completo' => $integrante->nombre . ' ' . $integrante->apellido,
-                'es_lider' => $integrante->es_lider ? true : false,
-                'asignado' => $asignado,
-                'pagado' => $pagos_cliente,
-                'pendiente' => $pendiente,
-                'estado' => $estado
+                'cliente_id'     => $integrante->id,
+                'nombre_completo'=> $integrante->nombres . ' ' . $integrante->apellidos,
+                'es_lider'       => $integrante->es_lider ? true : false,
+                'asignado'       => $asignado,
+                'pagado'         => $pagos_cliente,
+                'pendiente'      => $pendiente,
+                'estado'         => $estado
             ];
         });
 
@@ -169,7 +178,7 @@ class PagoService
             
             $pago_id = DB::table('pagos')->insertGetId([
                 'reserva_id'       => $datos['reserva_id'],
-                'cliente_id'       => $datos['cliente_id'] ?? null, // Si es grupal, quien hace el pago
+                'cliente_id'       => $datos['cliente_id'] ?? null,
                 'user_id'          => $datos['user_id'] ?? null,
                 'monto_depositado' => $monto,
                 'fecha_pago'       => $fecha_actual,
@@ -181,7 +190,7 @@ class PagoService
 
             // Actualizar estado de la reserva
             $reserva = Reserva::find($datos['reserva_id']);
-            if($reserva) {
+            if ($reserva) {
                 $totalPagado = DB::table('pagos')->where('reserva_id', $reserva->id)->sum('monto_depositado');
                 $nuevo_estado_pago = 'parcial';
                 if ($totalPagado >= $reserva->precio_total_viaje) {
