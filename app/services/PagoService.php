@@ -184,8 +184,6 @@ class PagoService
                 'fecha_pago'       => $fecha_actual,
                 'metodo_pago'      => strtolower($datos['metodo_pago'] ?? 'efectivo'),
                 'referencia'       => $datos['referencia'] ?? null,
-                'created_at'       => $fecha_actual,
-                'updated_at'       => $fecha_actual
             ]);
 
             // Actualizar estado de la reserva
