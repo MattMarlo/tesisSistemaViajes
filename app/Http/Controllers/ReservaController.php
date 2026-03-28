@@ -106,42 +106,70 @@ class ReservaController extends Controller
 
     /**
      * Remove the specified resource from storage.
-     * Lógica: Solo se puede eliminar si NO hay pagos registrados Y 
-     * el estado es 'pendiente' o 'cancelada' (validación del flujo del sistema).
+     * 
+     * LÓGICA DE NEGOCIO:
+     * ✅ PERMITIR eliminar SI:
+     *    - Estado es "pendiente" Y NO hay pagos
+     *    - Estado es "cancelada" Y NO hay pagos
+     * 
+     * ❌ NO permitir eliminar SI:
+     *    - Hay pagos registrados (anularlos primero)
+     *    - Estado es "confirmada" (cancelar primero)
      */
     public function destroy(Request $request, string $id)
     {
         $reserva = Reserva::findOrFail($id);
 
-        // Verificar si hay pagos registrados
-        if (DB::table('pagos')->where('reserva_id', $reserva->id)->exists()) {
-            $msg = 'No se puede eliminar: existen pagos registrados. Anule los pagos primero en el módulo de Pagos.';
+        // Verificación 1: ¿Hay pagos registrados?
+        $totalPagos = DB::table('pagos')->where('reserva_id', $reserva->id)->sum('monto_depositado');
+        if ($totalPagos > 0) {
+            $msg = 'No se puede eliminar: existen pagos por €'.number_format($totalPagos, 2).' registrados. Debe anularlos primero en el módulo de Pagos.';
             if ($request->wantsJson()) {
                 return response()->json(['success' => false, 'message' => $msg], 422);
             }
             return redirect()->route('reservas')->with('error', $msg);
         }
 
-        // Validar estado: solo se puede eliminar si está pendiente o cancelada
+        // Verificación 2: Estado debe ser "pendiente" o "cancelada"
+        $estadoActual = strtolower($reserva->estado);
         $estadosPermitidos = ['pendiente', 'cancelada'];
-        if (!in_array(strtolower($reserva->estado), $estadosPermitidos)) {
-            $msg = 'No se puede eliminar una reserva en estado "'.ucfirst($reserva->estado).'". Solo se pueden eliminar reservas pendientes o canceladas sin pagos.';
+        
+        if (!in_array($estadoActual, $estadosPermitidos)) {
+            $estadoFormato = ucfirst($estadoActual);
+            $msg = 'No se puede eliminar: la reserva está en estado "'.$estadoFormato.'". ' .
+                   'Solo se pueden eliminar reservas en estado Pendiente o Cancelada. ' .
+                   'Si es necesario eliminarla, primero cancélela.';
             if ($request->wantsJson()) {
                 return response()->json(['success' => false, 'message' => $msg], 422);
             }
             return redirect()->route('reservas')->with('error', $msg);
         }
 
-        DB::transaction(function () use ($reserva) {
-            DB::table('reservas_grupos')->where('reserva_id', $reserva->id)->delete();
-            $reserva->delete();
-        });
+        // Pasó todas las validaciones: proceder con eliminación
+        try {
+            DB::transaction(function () use ($reserva) {
+                // Eliminar relación de grupo si es grupal
+                if ($reserva->tipo === 'grupal') {
+                    DB::table('reservas_grupos')->where('reserva_id', $reserva->id)->delete();
+                }
+                // Eliminar la reserva
+                $reserva->delete();
+            });
 
-        if ($request->wantsJson()) {
-            return response()->json(['success' => true, 'message' => 'Reserva eliminada correctamente.']);
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => true, 
+                    'message' => 'Reserva ' . $reserva->codigo_reserva . ' eliminada correctamente del sistema.'
+                ]);
+            }
+            return redirect()->route('reservas')->with('success', 'Reserva eliminada correctamente.');
+        } catch (\Exception $e) {
+            $msgError = 'Error al eliminar la reserva: ' . $e->getMessage();
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => $msgError], 500);
+            }
+            return redirect()->route('reservas')->with('error', $msgError);
         }
-
-        return redirect()->route('reservas')->with('success', 'Reserva eliminada correctamente.');
     }
 
     public function detalleJson(string $id)

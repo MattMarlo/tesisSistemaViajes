@@ -438,13 +438,23 @@
         const btnPago = document.getElementById('btn_gestionar_pago');
         btnPago.href = @json(url('/pagos')) + '?reserva_id=' + d.id + '&abrir_cobro=1';
 
+        // Lógica de negocio para eliminar:
+        // - NO se puede eliminar si tiene pagos
+        // - NO se puede eliminar si está confirmada
+        // - SÍ se puede eliminar si está pendiente o cancelada SIN pagos
         const btnDel = document.getElementById('btn_eliminar_reserva');
-        if (d.pagos_activos > 0) {
+        const estadoConfirmada = (d.estado || '').toLowerCase() === 'confirmada';
+        const tienePagos = d.pagos_activos > 0;
+        
+        if (tienePagos) {
             btnDel.disabled = true;
-            btnDel.title = 'Existen pagos vinculados; anule primero en Pagos.';
+            btnDel.title = 'No se puede eliminar: existen pagos registrados. Anule los pagos en el módulo de Pagos.';
+        } else if (estadoConfirmada) {
+            btnDel.disabled = true;
+            btnDel.title = 'No se puede eliminar: la reserva está confirmada. Cancele la reserva primero si desea terminarla.';
         } else {
             btnDel.disabled = false;
-            btnDel.title = '';
+            btnDel.title = 'Eliminar esta reserva del sistema';
         }
     }
 
@@ -504,12 +514,27 @@
 
     function confirmarEliminarReserva() {
         if (!datosDetalleActual) return;
+        
+        // Validación 1: Si tiene pagos no se puede eliminar
         if (datosDetalleActual.pagos_activos > 0) {
-            alert('No se puede eliminar: existen pagos activos. Anule los pagos primero.');
+            alert('❌ No se puede eliminar esta reserva.\n\n' +
+                  'Razón: Existen ' + datosDetalleActual.pagos_activos + ' pago(s) registrado(s).\n\n' +
+                  'Solución: Debe anular los pagos primero en el módulo de Pagos.');
             return;
         }
-        if (!confirm('¿Eliminar esta reserva del itinerario?')) return;
-        if (!confirm('Esta acción es definitiva. ¿Confirma la eliminación?')) return;
+        
+        // Validación 2: Si está confirmada no se puede eliminar
+        const estadoActual = (datosDetalleActual.estado || '').toLowerCase();
+        if (estadoActual === 'confirmada') {
+            alert('❌ No se puede eliminar esta reserva.\n\n' +
+                  'Razón: La reserva está en estado "Confirmada".\n\n' +
+                  'Solución: Primero debe cancelar la reserva, luego podrá eliminarla.');
+            return;
+        }
+        
+        // Si pasa las validaciones, pedir confirmación
+        if (!confirm('¿Desea eliminar esta reserva del sistema?\n\nReserva: ' + datosDetalleActual.codigo_reserva)) return;
+        if (!confirm('⚠️ Esta acción es DEFINITIVA y no se puede deshacer. ¿Confirma la eliminación?')) return;
 
         const id = datosDetalleActual.id;
         fetch(detalleUrlBase + '/' + id, {
@@ -519,15 +544,20 @@
                 'X-CSRF-TOKEN': csrfToken(),
             },
         })
-            .then(r => r.json().then(j => ({ ok: r.ok, j })))
-            .then(({ ok, j }) => {
+            .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j })))
+            .then(({ ok, status, j }) => {
                 if (!ok) {
-                    alert(j.message || 'No se pudo eliminar');
+                    const msgError = j.message || 'No se pudo eliminar la reserva';
+                    alert('❌ Error al eliminar:\n\n' + msgError);
                     return;
                 }
+                alert('✅ Reserva eliminada correctamente del sistema.');
                 window.location.reload();
             })
-            .catch(() => alert('Error de red.'));
+            .catch(err => {
+                console.error('Error:', err);
+                alert('❌ Error de red al intentar eliminar la reserva.');
+            });
     }
 
     function abrirModalCobrarReserva(reservaId, clienteNombre, pendiente) {
