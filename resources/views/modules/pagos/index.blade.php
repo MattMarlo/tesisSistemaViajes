@@ -539,7 +539,8 @@
             <div class="modal-footer border-0 flex-wrap gap-2">
                 <button type="button" class="btn btn-secondary text-white" style="background:#334155;border:none;" data-bs-dismiss="modal">Cerrar</button>
                 <button type="button" class="btn text-white" style="background:#3b82f6;" id="btn_abrir_editar_pago" onclick="abrirModalEditarDesdeAuditoria()">Editar pago</button>
-                <button type="button" class="btn text-white" style="background:#ef4444;" id="btn_abrir_anular_pago" onclick="confirmarAnularPago()">Anular pago</button>
+                <button type="button" class="btn text-white" style="background:#ef4444;" id="btn_anular_este_pago" onclick="confirmarAnularPago()">Anular este pago</button>
+                <button type="button" class="btn text-white" style="background:#ec4899;" id="btn_anular_otro_pago" onclick="abrirModalAnularOtroPago()">Anular otro pago</button>
             </div>
         </div>
     </div>
@@ -588,6 +589,29 @@
     @method('DELETE')
     <input type="hidden" name="reserva_id" id="anular_ctx_reserva_id" value="">
 </form>
+
+{{-- Modal: Anular un pago diferente --}}
+<div class="modal fade" id="modalAnularOtroPago" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content dark-modal">
+            <div class="modal-header border-0">
+                <h5 class="modal-title fw-bold">Anular un pago diferente</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label text-secondary fw-semibold mb-2">Seleccione qué pago desea anular:</label>
+                <div id="lista_pagos_anular" style="max-height: 300px; overflow-y: auto; border: 1px solid #2d313f; border-radius: 8px; padding: 0;">
+                    <div class="text-center text-muted py-4">Cargando pagos...</div>
+                </div>
+                <input type="hidden" id="pago_seleccionado_id" value="">
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-secondary text-white" style="background:#334155;border:none;" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn text-white" style="background:#ef4444;" id="btn_confirmar_anular" onclick="confirmarAnularPagoSeleccionado()" disabled>Anular pago seleccionado</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 {{-- Editar integrante grupal --}}
 <div class="modal fade" id="modalEditarIntegrante" tabindex="-1" aria-hidden="true">
@@ -841,6 +865,115 @@
 
         var myModal = new bootstrap.Modal(document.getElementById('modalRegistrarPago'));
         myModal.show();
+    }
+
+    /**
+     * NUEVO: Abre modal para seleccionar y anular un pago diferente
+     * Carga todos los pagos de la reserva en una lista seleccionable
+     */
+    function abrirModalAnularOtroPago() {
+        if (!reservaCtxAuditoria) {
+            alert('No hay contexto de reserva. Por favor, intente nuevamente.');
+            return;
+        }
+
+        // Cerrar modal actual
+        bootstrap.Modal.getInstance(document.getElementById('modalAuditoriaPago'))?.hide();
+
+        // Limpiar estado previo
+        document.getElementById('pago_seleccionado_id').value = '';
+        document.getElementById('btn_confirmar_anular').disabled = true;
+        document.getElementById('lista_pagos_anular').innerHTML = '<div class="text-center text-muted py-4">Cargando pagos...</div>';
+
+        // Cargar todos los pagos de la reserva
+        fetch(pagosBase + '/reserva/' + reservaCtxAuditoria + '/pagos-lista', {
+            headers: { 'Accept': 'application/json' }
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success || !data.data || data.data.length === 0) {
+                    document.getElementById('lista_pagos_anular').innerHTML = 
+                        '<div class="text-center text-muted py-4">No hay pagos registrados en esta reserva.</div>';
+                    return;
+                }
+
+                const listHTML = data.data.map((pago, idx) => `
+                    <div style="padding:12px;border-bottom:1px solid #2d313f;cursor:pointer;transition:all 0.2s;" 
+                         class="pago-item" 
+                         data-pago-id="${pago.id}"
+                         onclick="seleccionarPago(${pago.id}, this)">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong class="text-white d-block">${pago.cliente}</strong>
+                                <small class="text-muted">ID: #${pago.id} • ${pago.metodo_pago} • ${pago.fecha_pago_fmt}</small>
+                            </div>
+                            <span class="text-cobrado fw-bold" style="font-size:1.1rem;">€${Number(pago.monto).toFixed(2)}</span>
+                        </div>
+                        ${pago.referencia && pago.referencia !== '—' ? '<small class="text-muted d-block mt-1">Ref: ' + pago.referencia + '</small>' : ''}
+                    </div>
+                `).join('');
+
+                document.getElementById('lista_pagos_anular').innerHTML = listHTML;
+            })
+            .catch(err => {
+                console.error(err);
+                document.getElementById('lista_pagos_anular').innerHTML = 
+                    '<div class="text-center text-danger py-4">Error al cargar los pagos.</div>';
+            });
+
+        // Mostrar modal
+        new bootstrap.Modal(document.getElementById('modalAnularOtroPago')).show();
+    }
+
+    /**
+     * NUEVO: Selecciona un pago de la lista y lo habilita para anular
+     */
+    function seleccionarPago(pagoId, element) {
+        // Limpiar selección anterior
+        document.querySelectorAll('.pago-item').forEach(item => {
+            item.style.backgroundColor = 'transparent';
+            item.style.borderLeft = '4px solid transparent';
+        });
+
+        // Marcar como seleccionado
+        element.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+        element.style.borderLeft = '4px solid #ef4444';
+
+        // Guardar ID y habilitar botón
+        document.getElementById('pago_seleccionado_id').value = pagoId;
+        document.getElementById('btn_confirmar_anular').disabled = false;
+    }
+
+    /**
+     * NUEVO: Confirma la anulación del pago seleccionado
+     */
+    function confirmarAnularPagoSeleccionado() {
+        const pagoId = document.getElementById('pago_seleccionado_id').value;
+        
+        if (!pagoId) {
+            alert('Por favor, seleccione un pago para anular.');
+            return;
+        }
+
+        if (!confirm('¿Está seguro de que desea ANULAR este pago?\n\nEl monto se restará del balance de la reserva.')) {
+            return;
+        }
+
+        if (!confirm('⚠️ Confirmación final: ¿Anular el registro contable?')) {
+            return;
+        }
+
+        // Proceder con la anulación
+        const f = document.getElementById('formAnularPago');
+        f.action = pagosBase + '/' + pagoId;
+        document.getElementById('anular_ctx_reserva_id').value = reservaCtxAuditoria || '';
+        
+        // Mostrar mensajede progreso
+        document.getElementById('btn_confirmar_anular').disabled = true;
+        document.getElementById('btn_confirmar_anular').innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Anulando...';
+
+        // Enviar formulario
+        f.submit();
     }
 </script>
 @endsection

@@ -113,6 +113,43 @@ class PagoController extends Controller
         ]);
     }
 
+    /**
+     * Obtener todos los pagos de una reserva para poder seleccionar cuál anular
+     * @param int $reservaId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function listaPagosReserva(int $reservaId)
+    {
+        $pagos = Pago::where('reserva_id', $reservaId)
+            ->with(['cliente', 'user'])
+            ->orderBy('fecha_pago', 'desc')
+            ->get();
+
+        $pagosFormato = $pagos->map(function ($pago) {
+            $cobrador = $pago->user
+                ? trim(($pago->user->nombres ?? '').' '.($pago->user->apellidos ?? ''))
+                : '—';
+
+            return [
+                'id'              => $pago->id,
+                'monto'           => (float) $pago->monto_depositado,
+                'metodo_pago'     => ucfirst($pago->metodo_pago),
+                'referencia'      => $pago->referencia ?? '—',
+                'fecha_pago_fmt'  => \Carbon\Carbon::parse($pago->fecha_pago)->format('d/m/Y H:i:s'),
+                'cobrador'        => $cobrador,
+                'cliente'         => $pago->cliente
+                    ? trim($pago->cliente->nombres.' '.$pago->cliente->apellidos)
+                    : '—',
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data'    => $pagosFormato,
+            'total'   => $pagos->sum('monto_depositado'),
+        ]);
+    }
+
     public function update(Request $request, Pago $pago)
     {
         $request->validate([

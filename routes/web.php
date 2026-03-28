@@ -66,6 +66,7 @@ Route::middleware('auth')->group(function() {
         Route::post('/store', [PagoController::class, 'store'])->name('pagos.store');
         Route::put('/integrante-grupal', [PagoController::class, 'updateIntegrante'])->name('pagos.integrante');
         Route::get('/grupo/{reserva}', [PagoController::class, 'showGrupoDetails'])->name('pagos.grupo');
+        Route::get('/reserva/{reservaId}/pagos-lista', [PagoController::class, 'listaPagosReserva'])->name('pagos.lista');
         Route::get('/{pago}/auditoria', [PagoController::class, 'auditoria'])->name('pagos.auditoria');
         Route::put('/{pago}', [PagoController::class, 'update'])->name('pagos.update');
         Route::delete('/{pago}', [PagoController::class, 'anular'])->name('pagos.anular');
