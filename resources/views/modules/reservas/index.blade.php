@@ -186,6 +186,29 @@
                 </div>
 
                 <hr class="my-4">
+                {{-- Integrantes del grupo si es grupal --}}
+                <div id="seccion_integrantes" style="display:none;" class="mb-4">
+                    <h6 class="fw-bold text-secondary text-uppercase small mb-3">Integrantes del grupo</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Nombre</th>
+                                    <th>Email</th>
+                                    <th>Teléfono</th>
+                                    <th class="text-end">Asignado</th>
+                                    <th class="text-end">Pagado</th>
+                                    <th class="text-end">Deuda</th>
+                                    <th class="text-center">Rol</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla_integrantes">
+                            </tbody>
+                        </table>
+                    </div>
+                    <hr class="my-3">
+                </div>
+
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h6 class="fw-bold mb-0 text-secondary text-uppercase small">Registrar pago</h6>
                     <span class="small text-muted">Saldo estimado: <strong id="detalle_saldo_pendiente" class="text-danger">—</strong></span>
@@ -195,6 +218,12 @@
                     <input type="hidden" name="redirect_after" value="reservas">
                     <input type="hidden" name="reserva_id" id="registro_reserva_id">
                     <input type="hidden" name="cliente_id" id="registro_cliente_id">
+                    <div id="campo_cliente_grupal" style="display:none;" class="mb-2">
+                        <label class="form-label small fw-semibold">Cliente a cobrar</label>
+                        <select name="cliente_id" id="registro_cliente_grupal" class="form-select form-select-sm" onchange="actualizarMontoPendienteGrupal()">
+                            <option value="">Seleccionar cliente...</option>
+                        </select>
+                    </div>
                     <div class="row g-2 align-items-end">
                         <div class="col-md-3">
                             <label class="form-label small mb-0">Monto (€)</label>
@@ -222,7 +251,7 @@
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
                 <button type="button" class="btn text-white" style="background:#3b82f6;" id="btn_editar_logistica" onclick="activarEdicionReserva()">Editar</button>
                 <button type="button" class="btn btn-outline-danger" id="btn_eliminar_reserva" onclick="confirmarEliminarReserva()">Eliminar</button>
-                <a href="#" class="btn text-white fw-bold d-none" id="btn_gestionar_pago" style="background:#10b981;">Gestionar pago</a>
+                <a href="#" class="btn text-white fw-bold" id="btn_gestionar_pago" style="background:#10b981;">Gestionar pago</a>
             </div>
         </div>
     </div>
@@ -336,6 +365,48 @@
             gl.style.display = 'none';
         }
 
+        // Mostrar integrantes si es grupal
+        const seccionIntegrantes = document.getElementById('seccion_integrantes');
+        const tablaIntegrantes = document.getElementById('tabla_integrantes');
+        const campClienteGrupal = document.getElementById('campo_cliente_grupal');
+        
+        if (d.tipo === 'grupal' && d.integrantes && d.integrantes.length > 0) {
+            seccionIntegrantes.style.display = 'block';
+            tablaIntegrantes.innerHTML = '';
+            
+            const selectClientes = document.getElementById('registro_cliente_grupal');
+            selectClientes.innerHTML = '<option value="">Seleccionar cliente...</option>';
+            
+            d.integrantes.forEach(integrante => {
+                // Agregar fila a tabla
+                const fila = document.createElement('tr');
+                const nombreCompleto = (integrante.nombres + ' ' + integrante.apellidos).trim();
+                fila.innerHTML = `
+                    <td><strong>${nombreCompleto}</strong></td>
+                    <td>${integrante.email || '—'}</td>
+                    <td>${integrante.telefono || '—'}</td>
+                    <td class="text-end">€${Number(integrante.monto_asignado).toFixed(2)}</td>
+                    <td class="text-end">€${Number(integrante.pagado).toFixed(2)}</td>
+                    <td class="text-end"><span class="badge ${integrante.deuda > 0 ? 'bg-danger' : 'bg-success'}">€${Number(integrante.deuda).toFixed(2)}</span></td>
+                    <td class="text-center"><small>${integrante.es_lider ? '<span class="badge bg-dark">Líder</span>' : '—'}</small></td>
+                `;
+                tablaIntegrantes.appendChild(fila);
+                
+                // Agregar opción al select solo si tiene deuda
+                if (integrante.deuda > 0) {
+                    const option = document.createElement('option');
+                    option.value = integrante.id;
+                    option.textContent = nombreCompleto + ' (Deuda: €' + Number(integrante.deuda).toFixed(2) + ')';
+                    selectClientes.appendChild(option);
+                }
+            });
+            
+            campClienteGrupal.style.display = 'block';
+        } else {
+            seccionIntegrantes.style.display = 'none';
+            campClienteGrupal.style.display = 'none';
+        }
+
         document.getElementById('edit_reserva_id').value = d.id;
         document.getElementById('registro_reserva_id').value = d.id;
         document.getElementById('registro_cliente_id').value = d.cliente_id || '';
@@ -363,14 +434,9 @@
         document.getElementById('vista_lectura_viaje').classList.remove('d-none');
         document.getElementById('btn_editar_logistica').classList.remove('d-none');
 
+        // Botón gestionar pago siempre visible, actualizar enlace
         const btnPago = document.getElementById('btn_gestionar_pago');
-        const ep = (d.estado_pago || '').toLowerCase();
-        if (ep === 'pendiente' || ep === 'parcial') {
-            btnPago.classList.remove('d-none');
-            btnPago.href = @json(url('/pagos')) + '?reserva_id=' + d.id + '&abrir_cobro=1';
-        } else {
-            btnPago.classList.add('d-none');
-        }
+        btnPago.href = @json(url('/pagos')) + '?reserva_id=' + d.id + '&abrir_cobro=1';
 
         const btnDel = document.getElementById('btn_eliminar_reserva');
         if (d.pagos_activos > 0) {
@@ -379,6 +445,22 @@
         } else {
             btnDel.disabled = false;
             btnDel.title = '';
+        }
+    }
+
+    function actualizarMontoPendienteGrupal() {
+        if (!datosDetalleActual) return;
+        
+        const clienteId = parseInt(document.getElementById('registro_cliente_grupal').value);
+        if (!clienteId) {
+            document.getElementById('registro_monto').value = '';
+            return;
+        }
+        
+        const integrante = datosDetalleActual.integrantes.find(i => i.id === clienteId);
+        if (integrante) {
+            document.getElementById('registro_monto').value = integrante.deuda.toFixed(2);
+            document.getElementById('registro_cliente_id').value = clienteId;
         }
     }
 

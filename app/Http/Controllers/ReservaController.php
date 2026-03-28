@@ -106,17 +106,29 @@ class ReservaController extends Controller
 
     /**
      * Remove the specified resource from storage.
+     * Lógica: Solo se puede eliminar si NO hay pagos registrados Y 
+     * el estado es 'pendiente' o 'cancelada' (validación del flujo del sistema).
      */
     public function destroy(Request $request, string $id)
     {
         $reserva = Reserva::findOrFail($id);
 
+        // Verificar si hay pagos registrados
         if (DB::table('pagos')->where('reserva_id', $reserva->id)->exists()) {
-            $msg = 'No se puede eliminar la reserva: existen pagos registrados. Anule los pagos primero desde el módulo de Pagos.';
+            $msg = 'No se puede eliminar: existen pagos registrados. Anule los pagos primero en el módulo de Pagos.';
             if ($request->wantsJson()) {
                 return response()->json(['success' => false, 'message' => $msg], 422);
             }
+            return redirect()->route('reservas')->with('error', $msg);
+        }
 
+        // Validar estado: solo se puede eliminar si está pendiente o cancelada
+        $estadosPermitidos = ['pendiente', 'cancelada'];
+        if (!in_array(strtolower($reserva->estado), $estadosPermitidos)) {
+            $msg = 'No se puede eliminar una reserva en estado "'.ucfirst($reserva->estado).'". Solo se pueden eliminar reservas pendientes o canceladas sin pagos.';
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => $msg], 422);
+            }
             return redirect()->route('reservas')->with('error', $msg);
         }
 
@@ -144,8 +156,44 @@ class ReservaController extends Controller
             : '';
 
         $grupoNombre = null;
+        $integrantes = [];
+        
         if ($reserva->tipo === 'grupal' && $reserva->reservaGrupo && $reserva->reservaGrupo->grupo) {
             $grupoNombre = $reserva->reservaGrupo->grupo->nombre_grupo;
+            
+            // Obtener todos los integrantes del grupo
+            $grupo_id = $reserva->reservaGrupo->grupo_id;
+            $integrantesDB = DB::table('grupos_clientes')
+                ->join('clientes', 'grupos_clientes.cliente_id', '=', 'clientes.id')
+                ->where('grupos_clientes.grupo_id', $grupo_id)
+                ->select(
+                    'clientes.id',
+                    'clientes.nombres',
+                    'clientes.apellidos',
+                    'clientes.email',
+                    'clientes.telefono',
+                    'grupos_clientes.monto_asignado',
+                    'grupos_clientes.es_lider'
+                )
+                ->get();
+            
+            // Calcular deuda de cada integrante
+            foreach ($integrantesDB as $integrante) {
+                $pagosIntegrante = $reserva->pago->where('cliente_id', $integrante->id)->sum('monto_depositado');
+                $deuda = max(0, $integrante->monto_asignado - $pagosIntegrante);
+                
+                $integrantes[] = [
+                    'id' => $integrante->id,
+                    'nombres' => $integrante->nombres,
+                    'apellidos' => $integrante->apellidos,
+                    'email' => $integrante->email,
+                    'telefono' => $integrante->telefono,
+                    'monto_asignado' => (float) $integrante->monto_asignado,
+                    'pagado' => (float) $pagosIntegrante,
+                    'deuda' => (float) $deuda,
+                    'es_lider' => (bool) $integrante->es_lider,
+                ];
+            }
         }
 
         $destinos = Destino::query()->orderBy('pais')->get(['id', 'pais']);
@@ -177,6 +225,7 @@ class ReservaController extends Controller
                     'pais' => $reserva->destino->pais ?? '',
                 ],
                 'grupo_nombre'       => $grupoNombre,
+                'integrantes'        => $integrantes,
                 'itinerario_resumen' => ($reserva->destino ? 'Destino: '.$reserva->destino->pais.'. Salida: '.\Carbon\Carbon::parse($reserva->fecha_viaje)->format('d/m/Y') : ''),
                 'destinos_opciones'  => $destinos,
             ],
