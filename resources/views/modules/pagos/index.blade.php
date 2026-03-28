@@ -273,10 +273,30 @@
         </div>
     </div>
 
-    @if (session('success'))
+    @if (session('success') && !session('toast_sync'))
         <div class="alert alert-success bg-status-completado border-0">
             {{ session('success') }}
         </div>
+    @endif
+
+    @if($reservaFiltroId ?? null)
+        <div class="alert border-0 mb-3" style="background:rgba(59,130,246,0.12);color:#93c5fd;border:1px solid rgba(59,130,246,0.35)!important;">
+            Filtrando por reserva #{{ $reservaFiltroId }}.
+            <a href="{{ route('pagos') }}" class="text-white text-decoration-underline ms-2">Quitar filtro</a>
+        </div>
+    @endif
+
+    @if(session('toast_sync'))
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1090;">
+        <div id="toastSyncPagos" class="toast align-items-center text-bg-success border-0" role="alert" data-bs-autohide="true" data-bs-delay="5000">
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="bi bi-check2-circle me-1"></i> {{ session('success') }}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    </div>
     @endif
 
     <!-- Cards de Resumen -->
@@ -329,6 +349,9 @@
         </div>
         <div class="d-flex gap-2">
             <form action="{{ route('pagos') }}" method="GET" class="d-flex gap-2" id="formFiltros">
+                @if($reservaFiltroId ?? null)
+                    <input type="hidden" name="reserva_id" value="{{ $reservaFiltroId }}">
+                @endif
                 <select name="estado" class="form-select filter-select" onchange="document.getElementById('formFiltros').submit()">
                     <option value="todos" {{ $filtros['estado'] == 'todos' ? 'selected' : '' }}>Todos los estados</option>
                     <option value="completado" {{ $filtros['estado'] == 'completado' ? 'selected' : '' }}>Completado</option>
@@ -398,12 +421,16 @@
                         @endif
                     </td>
                     <td class="text-end text-nowrap">
-                        <button class="btn btn-action" onclick="abrirModalVer()">Ver</button>
-                        
+                        @if(!empty($reserva['id_ultimo_pago']))
+                            <button type="button" class="btn btn-action" onclick="abrirModalAuditoria({{ $reserva['id_ultimo_pago'] }}, {{ $reserva['reserva_id'] }})">Ver</button>
+                        @else
+                            <button type="button" class="btn btn-action" disabled title="Sin transacciones">Ver</button>
+                        @endif
+
                         @if($reserva['tipo'] == 'grupal')
-                            <button class="btn btn-action btn-desglose" data-id="{{ $reserva['reserva_id'] }}" data-nombre="{{ $reserva['cliente_grupo'] }}">Desglose</button>
+                            <button type="button" class="btn btn-action btn-desglose" data-id="{{ $reserva['reserva_id'] }}" data-nombre="{{ $reserva['cliente_grupo'] }}">Desglose</button>
                         @elseif($reserva['pendiente'] > 0)
-                            <button class="btn btn-action btn-action-cobrar" onclick="abrirModalCobrar({{ $reserva['reserva_id'] }}, '{{ $reserva['cliente_grupo'] }}', {{ $reserva['pendiente'] }})">Cobrar</button>
+                            <button type="button" class="btn btn-action btn-action-cobrar" onclick="abrirModalCobrar({{ $reserva['reserva_id'] }}, '{{ addslashes($reserva['cliente_grupo']) }}', {{ $reserva['pendiente'] }})">Cobrar</button>
                         @endif
                     </td>
                 </tr>
@@ -454,7 +481,7 @@
             <div class="modal-body">
                 <div class="mb-3">
                     <label class="form-label text-secondary">ID Reserva</label>
-                    <input type="number" name="reserva_id" id="modal_reserva_id" class="form-control dark-input" required>
+                    <input type="number" name="reserva_id" id="modal_reserva_id" class="form-control dark-input" required @if($reservaFiltroId ?? null) value="{{ $reservaFiltroId }}" readonly @endif>
                 </div>
                 
                 <input type="hidden" name="cliente_id" id="modal_cliente_id"> <!-- Solo si paga un integrante grupal -->
@@ -491,8 +518,221 @@
     </div>
 </div>
 
+{{-- Auditoría / recibo digital --}}
+<div class="modal fade" id="modalAuditoriaPago" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content dark-modal">
+            <div class="modal-header border-0">
+                <h5 class="modal-title fw-bold">Auditoría de transacción</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body small">
+                <p class="mb-2"><span class="text-secondary">ID pago:</span> <strong id="aud_id">—</strong></p>
+                <p class="mb-2"><span class="text-secondary">Reserva:</span> <strong id="aud_reserva">—</strong></p>
+                <p class="mb-2"><span class="text-secondary">Cliente:</span> <span id="aud_cliente">—</span></p>
+                <p class="mb-2"><span class="text-secondary">Cobró:</span> <span id="aud_cobrador">—</span></p>
+                <p class="mb-2"><span class="text-secondary">Método:</span> <span id="aud_metodo">—</span></p>
+                <p class="mb-2"><span class="text-secondary">Referencia:</span> <span id="aud_ref">—</span></p>
+                <p class="mb-0"><span class="text-secondary">Fecha ingreso:</span> <span id="aud_fecha" class="text-white">—</span></p>
+                <p class="mt-3 mb-0"><span class="text-secondary">Monto:</span> <span class="text-cobrado fs-5" id="aud_monto">—</span></p>
+            </div>
+            <div class="modal-footer border-0 flex-wrap gap-2">
+                <button type="button" class="btn btn-secondary text-white" style="background:#334155;border:none;" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn text-white" style="background:#3b82f6;" id="btn_abrir_editar_pago" onclick="abrirModalEditarDesdeAuditoria()">Editar pago</button>
+                <button type="button" class="btn text-white" style="background:#ef4444;" id="btn_abrir_anular_pago" onclick="confirmarAnularPago()">Anular pago</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{-- Editar pago --}}
+<div class="modal fade" id="modalEditarPago" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form id="formEditarPago" method="POST" class="modal-content dark-modal">
+            @csrf
+            @method('PUT')
+            <input type="hidden" name="reserva_id" id="edit_ctx_reserva_id" value="">
+            <div class="modal-header border-0">
+                <h5 class="modal-title fw-bold">Editar pago</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label text-secondary">Monto (€)</label>
+                    <input type="number" step="0.01" name="monto_depositado" id="edit_pago_monto" class="form-control dark-input" required min="1">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-secondary">Método</label>
+                    <select name="metodo_pago" id="edit_pago_metodo" class="form-select dark-input" required>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="tarjeta">Tarjeta</option>
+                        <option value="efectivo">Efectivo</option>
+                        <option value="otro">Otro</option>
+                    </select>
+                </div>
+                <div class="mb-0">
+                    <label class="form-label text-secondary">Referencia</label>
+                    <input type="text" name="referencia" id="edit_pago_ref" class="form-control dark-input" maxlength="100">
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-secondary text-white" style="background:#334155;border:none;" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn text-white" style="background:#10b981;">Guardar corrección</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<form id="formAnularPago" method="POST" action="#" class="d-none">
+    @csrf
+    @method('DELETE')
+    <input type="hidden" name="reserva_id" id="anular_ctx_reserva_id" value="">
+</form>
+
+{{-- Editar integrante grupal --}}
+<div class="modal fade" id="modalEditarIntegrante" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content dark-modal">
+            <div class="modal-header border-0">
+                <h5 class="modal-title fw-bold">Editar integrante</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="int_reserva_id">
+                <input type="hidden" id="int_cliente_id">
+                <div class="mb-3">
+                    <label class="form-label text-secondary">Nombres</label>
+                    <input type="text" id="int_nombres" class="form-control dark-input" required maxlength="250">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-secondary">Apellidos</label>
+                    <input type="text" id="int_apellidos" class="form-control dark-input" required maxlength="250">
+                </div>
+                <div class="mb-0">
+                    <label class="form-label text-secondary">Monto asignado (€)</label>
+                    <input type="number" step="0.01" id="int_monto" class="form-control dark-input" required min="0">
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-secondary text-white" style="background:#334155;border:none;" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn text-white" style="background:#3b82f6;" onclick="guardarIntegrante()">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
+    const pagosBase = @json(url('/pagos'));
+    const csrfPagos = () => document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    let pagoAuditoriaActual = null;
+    let reservaCtxAuditoria = null;
+
+    function abrirModalAuditoria(pagoId, reservaId) {
+        reservaCtxAuditoria = reservaId;
+        fetch(pagosBase + '/' + pagoId + '/auditoria', { headers: { 'Accept': 'application/json' } })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) throw new Error();
+                pagoAuditoriaActual = data.data;
+                document.getElementById('aud_id').textContent = '#' + data.data.id;
+                document.getElementById('aud_reserva').textContent = '#' + data.data.reserva_id;
+                document.getElementById('aud_cliente').textContent = data.data.cliente;
+                document.getElementById('aud_cobrador').textContent = data.data.cobrador;
+                document.getElementById('aud_metodo').textContent = data.data.metodo_pago;
+                document.getElementById('aud_ref').textContent = data.data.referencia || '—';
+                document.getElementById('aud_fecha').textContent = data.data.fecha_pago_fmt;
+                document.getElementById('aud_monto').textContent = '€' + Number(data.data.monto).toLocaleString('es-ES');
+                new bootstrap.Modal(document.getElementById('modalAuditoriaPago')).show();
+            })
+            .catch(() => alert('No se pudo cargar la auditoría del pago.'));
+    }
+
+    function abrirModalEditarDesdeAuditoria() {
+        if (!pagoAuditoriaActual) return;
+        bootstrap.Modal.getInstance(document.getElementById('modalAuditoriaPago'))?.hide();
+        document.getElementById('formEditarPago').action = pagosBase + '/' + pagoAuditoriaActual.id;
+        document.getElementById('edit_ctx_reserva_id').value = reservaCtxAuditoria || '';
+        document.getElementById('edit_pago_monto').value = pagoAuditoriaActual.monto;
+        const mv = (pagoAuditoriaActual.metodo_pago_val || '').toLowerCase();
+        document.getElementById('edit_pago_metodo').value = mv || 'efectivo';
+        document.getElementById('edit_pago_ref').value = pagoAuditoriaActual.referencia || '';
+        new bootstrap.Modal(document.getElementById('modalEditarPago')).show();
+    }
+
+    function confirmarAnularPago() {
+        if (!pagoAuditoriaActual) return;
+        if (!confirm('¿Anular este pago? El monto se restará del balance y se actualizará la reserva.')) return;
+        if (!confirm('Confirmación final: ¿anular el registro contable?')) return;
+        const f = document.getElementById('formAnularPago');
+        f.action = pagosBase + '/' + pagoAuditoriaActual.id;
+        document.getElementById('anular_ctx_reserva_id').value = reservaCtxAuditoria || '';
+        f.submit();
+    }
+
+    function abrirEditarIntegrante(reservaId, clienteId, nombreCompleto, asignado) {
+        const partes = (nombreCompleto || '').trim().split(/\s+/);
+        let nom = partes[0] || '';
+        let ape = partes.length > 1 ? partes.slice(1).join(' ') : '';
+        if (partes.length === 1 && nom) {
+            ape = '-';
+        }
+        document.getElementById('int_reserva_id').value = reservaId;
+        document.getElementById('int_cliente_id').value = clienteId;
+        document.getElementById('int_nombres').value = nom;
+        document.getElementById('int_apellidos').value = ape;
+        document.getElementById('int_monto').value = asignado;
+        new bootstrap.Modal(document.getElementById('modalEditarIntegrante')).show();
+    }
+
+    function guardarIntegrante() {
+        fetch(pagosBase + '/integrante-grupal', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfPagos(),
+            },
+            body: JSON.stringify({
+                reserva_id: document.getElementById('int_reserva_id').value,
+                cliente_id: document.getElementById('int_cliente_id').value,
+                nombres: document.getElementById('int_nombres').value,
+                apellidos: document.getElementById('int_apellidos').value,
+                monto_asignado: document.getElementById('int_monto').value,
+            }),
+        })
+            .then(r => r.json())
+            .then(j => {
+                if (j.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('modalEditarIntegrante'))?.hide();
+                    window.location.reload();
+                } else {
+                    alert(j.message || 'No se pudo guardar');
+                }
+            })
+            .catch(() => alert('Error de red'));
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
+        @if(session('toast_sync'))
+        const tp = document.getElementById('toastSyncPagos');
+        if (tp && typeof bootstrap !== 'undefined' && bootstrap.Toast) {
+            new bootstrap.Toast(tp).show();
+        }
+        @endif
+
+        @if(!empty($abrirCobro) && !empty($reservaFiltroId))
+        @php
+            $filaCobro = collect($reservas)->firstWhere('reserva_id', (int) $reservaFiltroId);
+        @endphp
+        @if($filaCobro)
+        abrirModalCobrar(
+            {{ (int) $reservaFiltroId }},
+            @json($filaCobro['cliente_grupo']),
+            {{ $filaCobro['pendiente'] }}
+        );
+        @endif
+        @endif
+
         // Buscador JS simple en tabla (opcional ya que hay backend, pero ayuda a UI fluida)
         document.getElementById('searchPagos').addEventListener('input', function(e) {
             const term = e.target.value.toLowerCase();
@@ -555,11 +795,13 @@
                                     else estadoBadge = '<span class="badge-status bg-status-sinpago"><i class="bi bi-circle-fill"></i> Sin pago</span>';
 
                                     let actionsBtn = '';
+                                    const nomJs = JSON.stringify(intg.nombre_completo);
                                     if(intg.pendiente > 0) {
-                                        actionsBtn = `<button class="btn btn-action btn-action-cobrar" onclick="abrirModalCobrar(${reservaId}, '${intg.nombre_completo}', ${intg.pendiente}, ${intg.cliente_id})">Cobrar</button>`;
+                                        actionsBtn = `<button type="button" class="btn btn-action btn-action-cobrar" onclick='abrirModalCobrar(${reservaId}, ${nomJs}, ${intg.pendiente}, ${intg.cliente_id})'>Cobrar</button>`;
                                     } else {
-                                        actionsBtn = `<button class="btn btn-action">Recibo</button>`;
+                                        actionsBtn = `<button type="button" class="btn btn-action" disabled>Recibo</button>`;
                                     }
+                                    actionsBtn += ` <button type="button" class="btn btn-action" title="Corregir nombre o monto asignado" onclick='abrirEditarIntegrante(${reservaId}, ${intg.cliente_id}, ${nomJs}, ${intg.asignado})'><i class="bi bi-pencil"></i></button>`;
 
                                     const tr = document.createElement('tr');
                                     tr.innerHTML = `
@@ -574,7 +816,7 @@
                                         <td class="text-cobrado">€${intg.pagado}</td>
                                         <td class="${pndColor}">€${intg.pendiente}</td>
                                         <td>${estadoBadge}</td>
-                                        <td class="text-end">${actionsBtn}</td>
+                                        <td class="text-end text-nowrap">${actionsBtn}</td>
                                     `;
                                     tbody.appendChild(tr);
                                 });
@@ -595,14 +837,10 @@
         document.getElementById('modal_reserva_id').value = reservaId;
         document.getElementById('modal_cliente_nombre').value = clienteNombre;
         document.getElementById('modal_monto').value = pendiente;
-        document.getElementById('modal_cliente_id').value = clienteId; // Set si es integrante grupal
-        
+        document.getElementById('modal_cliente_id').value = clienteId;
+
         var myModal = new bootstrap.Modal(document.getElementById('modalRegistrarPago'));
         myModal.show();
-    }
-
-    function abrirModalVer() {
-        alert("En desarrollo: Vista de detalles de la reserva.");
     }
 </script>
 @endsection

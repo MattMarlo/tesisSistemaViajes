@@ -54,16 +54,21 @@ Route::middleware('auth')->group(function() {
         Route::get('/edit/{id}', [GrupoController::class, 'edit'])->name('grupos.edit');
         Route::put('/update/{id}', [GrupoController::class, 'update'])->name('grupos.update');
     });
-    Route::prefix('reservas')->group(function() {
+    Route::prefix('reservas')->group(function () {
         Route::get('/', [ReservaController::class, 'index'])->name('reservas');
-        //Route::get('/create', [ReservaController::class, 'create'])->name('reservas.create');
-        //Route::post('/store', [ReservaController::class, 'store'])->name('reservas.store'); 
+        Route::get('/{reserva}/detalle', [ReservaController::class, 'detalleJson'])->name('reservas.detalle');
+        Route::put('/{reserva}', [ReservaController::class, 'update'])->name('reservas.update');
+        Route::delete('/{reserva}', [ReservaController::class, 'destroy'])->name('reservas.destroy');
     });
 
-    Route::prefix('pagos')->group(function() {
+    Route::prefix('pagos')->group(function () {
         Route::get('/', [PagoController::class, 'index'])->name('pagos');
         Route::post('/store', [PagoController::class, 'store'])->name('pagos.store');
+        Route::put('/integrante-grupal', [PagoController::class, 'updateIntegrante'])->name('pagos.integrante');
         Route::get('/grupo/{reserva}', [PagoController::class, 'showGrupoDetails'])->name('pagos.grupo');
+        Route::get('/{pago}/auditoria', [PagoController::class, 'auditoria'])->name('pagos.auditoria');
+        Route::put('/{pago}', [PagoController::class, 'update'])->name('pagos.update');
+        Route::delete('/{pago}', [PagoController::class, 'anular'])->name('pagos.anular');
     });
 
     // Flujo Individual

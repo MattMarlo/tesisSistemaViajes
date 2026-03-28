@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Reserva;
 use App\Models\Pago;
+use InvalidArgumentException;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
@@ -175,7 +176,7 @@ class PagoService
         return DB::transaction(function () use ($datos) {
             $fecha_actual = Carbon::now();
             $monto = $datos['monto_depositado'];
-            
+
             $pago_id = DB::table('pagos')->insertGetId([
                 'reserva_id'       => $datos['reserva_id'],
                 'cliente_id'       => $datos['cliente_id'] ?? null,
@@ -186,20 +187,80 @@ class PagoService
                 'referencia'       => $datos['referencia'] ?? null,
             ]);
 
-            // Actualizar estado de la reserva
-            $reserva = Reserva::find($datos['reserva_id']);
-            if ($reserva) {
-                $totalPagado = DB::table('pagos')->where('reserva_id', $reserva->id)->sum('monto_depositado');
-                $nuevo_estado_pago = 'parcial';
-                if ($totalPagado >= $reserva->precio_total_viaje) {
-                    $nuevo_estado_pago = 'pagado';
-                    $reserva->estado = 'confirmada';
-                }
-                $reserva->estado_pago = $nuevo_estado_pago;
-                $reserva->save();
-            }
+            $this->sincronizarEstadoPagoReserva((int) $datos['reserva_id']);
 
             return $pago_id;
         });
+    }
+
+    /**
+     * Recalcula estado_pago (y confirma la reserva si corresponde) según suma de pagos.
+     */
+    public function sincronizarEstadoPagoReserva(int $reservaId): void
+    {
+        $reserva = Reserva::find($reservaId);
+        if (!$reserva) {
+            return;
+        }
+
+        $totalPagado = (float) DB::table('pagos')->where('reserva_id', $reserva->id)->sum('monto_depositado');
+        $precio = (float) $reserva->precio_total_viaje;
+
+        if ($totalPagado <= 0) {
+            $reserva->estado_pago = 'pendiente';
+        } elseif ($precio > 0 && $totalPagado >= $precio) {
+            $reserva->estado_pago = 'pagado';
+            if ($reserva->estado !== 'cancelada') {
+                $reserva->estado = 'confirmada';
+            }
+        } else {
+            $reserva->estado_pago = 'parcial';
+        }
+
+        $reserva->save();
+    }
+
+    public function actualizarPago(int $pagoId, array $datos): void
+    {
+        DB::transaction(function () use ($pagoId, $datos) {
+            $pago = Pago::findOrFail($pagoId);
+            $updates = [
+                'monto_depositado' => $datos['monto_depositado'],
+                'metodo_pago'      => strtolower($datos['metodo_pago'] ?? $pago->metodo_pago),
+                'referencia'       => $datos['referencia'] ?? null,
+            ];
+            DB::table('pagos')->where('id', $pagoId)->update($updates);
+
+            $this->sincronizarEstadoPagoReserva((int) $pago->reserva_id);
+        });
+    }
+
+    public function anularPago(int $pagoId): void
+    {
+        DB::transaction(function () use ($pagoId) {
+            $pago = Pago::findOrFail($pagoId);
+            $reservaId = (int) $pago->reserva_id;
+            DB::table('pagos')->where('id', $pagoId)->delete();
+            $this->sincronizarEstadoPagoReserva($reservaId);
+        });
+    }
+
+    public function actualizarIntegranteGrupal(int $reservaId, int $clienteId, array $datos): void
+    {
+        $reserva = Reserva::with('reservaGrupo')->findOrFail($reservaId);
+        if ($reserva->tipo !== 'grupal' || !$reserva->reservaGrupo) {
+            throw new InvalidArgumentException('La reserva no es grupal.');
+        }
+        $grupoId = $reserva->reservaGrupo->grupo_id;
+
+        DB::table('clientes')->where('id', $clienteId)->update([
+            'nombres'   => $datos['nombres'],
+            'apellidos' => $datos['apellidos'],
+        ]);
+
+        DB::table('grupos_clientes')
+            ->where('grupo_id', $grupoId)
+            ->where('cliente_id', $clienteId)
+            ->update(['monto_asignado' => $datos['monto_asignado']]);
     }
 }
