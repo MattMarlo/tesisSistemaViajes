@@ -186,7 +186,7 @@
         <li><a href="{{route('usuarios')}}" class="nav-link {{ request()->routeIs('usuarios*') ? 'active' : '' }}"><i class="bi bi-people-fill"></i><span>Usuarios</span></a></li>
         <li><a href="{{route('clientes')}}" class="nav-link {{ request()->routeIs('clientes*') ? 'active' : '' }}"><i class="bi bi-person-circle"></i><span>Clientes</span></a></li>
         <li><a href="{{route('destinos')}}" class="nav-link {{ request()->routeIs('destinos*') ? 'active' : '' }}"><i class="bi bi-airplane"></i><span>Destinos</span></a></li>
-        <li><a href="{{route('grupos')}}" class="nav-link {{ request()->routeIs('grupos*') ? 'active' : '' }}"><i class="bi bi-geo-alt"></i><span>Grupos</span></a></li>
+        <!--<li><a href="{{route('grupos')}}" class="nav-link {{ request()->routeIs('grupos*') ? 'active' : '' }}"><i class="bi bi-geo-alt"></i><span>Grupos</span></a></li>-->
         <li><a href="{{route('reservas')}}" class="nav-link {{ request()->routeIs('reservas*') ? 'active' : '' }}"><i class="bi bi-calendar-fill"></i><span>Reservas</span></a></li>
         <li><a href="{{route('pagos')}}" class="nav-link {{ request()->routeIs('pagos*') ? 'active' : '' }}"><i class="bi bi-wallet2"></i><span>Pagos</span></a></li>
         <li><a href="#" class="nav-link"><i class="bi bi-cpu"></i><span>Automatización</span></a></li>

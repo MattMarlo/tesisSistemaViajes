@@ -13,10 +13,11 @@ return new class extends Migration
     {
         Schema::create('grupos_clientes', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('grupo_id')->constrained('grupos')->restrictOnDelete();
-            $table->foreignId('cliente_id')->constrained('clientes')->restrictOndelete();
+            $table->foreignId('grupo_id')->constrained('grupos')->cascadeOnDelete();
+            $table->foreignId('cliente_id')->constrained('clientes')->cascadeOndelete();
             $table->decimal('monto_asignado',10,2)->default(0.00);
             $table->boolean('es_lider')->default(false);
+            $table->timestamps();
         });
     }
 

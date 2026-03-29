@@ -21,7 +21,7 @@ return new class extends Migration
             $table->primary('reserva_id');
             
             // Definimos la relación foránea manualmente para la PK
-            $table->foreign('reserva_id')->references('id')->on('reservas');
+            $table->foreign('reserva_id')->references('id')->on('reservas')->onDelete('cascade');
         });
     }
 
