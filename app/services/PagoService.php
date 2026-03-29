@@ -208,6 +208,7 @@ class PagoService
 
         if ($totalPagado <= 0) {
             $reserva->estado_pago = 'pendiente';
+            $reserva->estado = 'pendiente';
         } elseif ($precio > 0 && $totalPagado >= $precio) {
             $reserva->estado_pago = 'pagado';
             if ($reserva->estado !== 'cancelada') {
@@ -215,6 +216,7 @@ class PagoService
             }
         } else {
             $reserva->estado_pago = 'parcial';
+            $reserva->estado = 'pendiente';
         }
 
         $reserva->save();

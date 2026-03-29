@@ -257,6 +257,7 @@ class ReservaController extends Controller
                 'itinerario_resumen' => ($reserva->destino ? 'Destino: '.$reserva->destino->pais.'. Salida: '.\Carbon\Carbon::parse($reserva->fecha_viaje)->format('d/m/Y') : ''),
                 'destinos_opciones'  => $destinos,
             ],
+            
         ]);
     }
 
