@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Destino;
 use App\Models\Reserva;
+use App\Models\Cliente;
 use App\Services\PagoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -50,11 +51,14 @@ class ReservaController extends Controller
             'r.precio_total_viaje',
             'r.estado',
             'r.estado_pago',
+            DB::raw('MAX(g.nombre_grupo) as nombre_grupo'),
             DB::raw('COALESCE(SUM(p.monto_depositado),0) as total_depositado')
         )
         ->join('clientes as c','r.cliente_id','=','c.id')
         ->join('destinos as d','r.destino_id','=','d.id')
         ->leftJoin('pagos as p','r.id','=','p.reserva_id') // 👈 clave
+        ->leftJoin('reservas_grupos as rg', 'r.id', '=', 'rg.reserva_id') // 👈 NUEVO
+        ->leftJoin('grupos as g', 'rg.grupo_id', '=', 'g.id') //nuevo
         ->groupBy(
             'r.id',
             'r.codigo_reserva',
@@ -65,10 +69,12 @@ class ReservaController extends Controller
             'r.fecha_viaje',
             'r.precio_total_viaje',
             'r.estado',
-            'r.estado_pago'
+            'r.estado_pago',
+            'g.nombre_grupo'
         )
         ->orderBy('r.id', 'desc')
         ->paginate(10);
+       
         return view('modules.reservas.index', compact('reservas','titulo'));
     }
 
@@ -289,5 +295,52 @@ class ReservaController extends Controller
         }
 
         return redirect()->route('reservas')->with('success', 'Reserva actualizada correctamente.');
+    }
+    public function updateIntegranteFast(Request $request ,$id ){
+        // 1. VALIDACIÓN: Solo permitimos los campos reales de tu migración 'clientes'
+        $request->validate([
+            'campo' => 'required|in:nombres,apellidos,email,telefono',
+            'valor' => 'required|string|max:250'
+        ]);
+
+        try {
+            // 2. BUSCAR: Localizamos al cliente por el ID enviado desde el JS
+            $cliente = Cliente::findOrFail($id);
+            
+            // 3. REGLA ESPECIAL PARA EMAIL: Evitar duplicados
+            if ($request->campo === 'email') {
+                $existe = Cliente::where('email', $request->valor)
+                                ->where('id', '!=', $id)
+                                ->exists();
+                if ($existe) {
+                    return response()->json([
+                        'success' => false, 
+                        'message' => 'Este correo electrónico ya está registrado con otro cliente.'
+                    ], 422);
+                }
+            }
+
+            // 4. GUARDADO DINÁMICO: 
+            // Si $request->campo es 'nombres', esto hace: $cliente->nombres = 'valor'
+            $columna = $request->campo;
+            $cliente->$columna = $request->valor;
+            $cliente->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => '¡Actualizado con éxito!'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No se encontró el registro del integrante.'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error en el servidor: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

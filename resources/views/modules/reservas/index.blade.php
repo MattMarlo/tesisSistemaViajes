@@ -62,7 +62,12 @@
                     <tr>
                         <td class="fw-bold">{{ $res->id }}</td>
                         <td class="fw-bold">{{ $res->codigo_reserva }}</td>
-                        <td>{{ $res->nombres }} {{ $res->apellidos }}</td>
+                        @if ($res->tipo=='grupal')
+                            <td>{{ $res->nombre_grupo }} </td>
+                        @else
+                            <td>{{ $res->nombres }} {{ $res->apellidos }}</td>
+                        @endif
+                        
                         <td><span class="badge bg-secondary">{{ $res->pais }}</span></td>
                         <td><span class="text-capitalize">{{ $res->tipo }}</span></td>
                         <td>{{ \Carbon\Carbon::parse($res->fecha_viaje)->format('d/m/Y') }}</td>
@@ -188,12 +193,19 @@
                 <hr class="my-4">
                 {{-- Integrantes del grupo si es grupal --}}
                 <div id="seccion_integrantes" style="display:none;" class="mb-4">
-                    <h6 class="fw-bold text-secondary text-uppercase small mb-3">Integrantes del grupo</h6>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold text-secondary text-uppercase small mb-3">Integrantes del grupo</h6>
+                        
+                        <button type="button" class="btn btn-sm btn-outline-primary shadow-sm" onclick="abrirGestionIntegrantes()">
+                            <i class="bi bi-gear-fill me-1"></i> Gestionar
+                        </button>
+                    </div>
                     <div class="table-responsive">
                         <table class="table table-sm table-hover mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th>Nombre</th>
+                                    <th>Nombres</th>
+                                    <th>Apellidos</th>
                                     <th>Email</th>
                                     <th>Teléfono</th>
                                     <th class="text-end">Asignado</th>
@@ -307,6 +319,33 @@
     </div>
 </div>
 
+<div class="modal fade" id="modalGestionIntegrantes" tabindex="-1" aria-hidden="true" style="z-index: 1060;">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content shadow-lg border-0">
+            <div class="modal-header bg-dark text-white">
+                <h6 class="modal-title fw-bold"><i class="bi bi-people-fill me-2"></i>Gestionar Integrantes</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="contenedor_edicion_grupo">
+                    <label class="form-label small fw-bold text-secondary">Añadir nuevo integrante</label>
+                    <div class="input-group input-group-sm mb-3">
+                        <input type="text" class="form-control" placeholder="Buscar por nombre o DNI...">
+                        <button class="btn btn-primary" type="button">Buscar</button>
+                    </div>
+                    <hr>
+                    <label class="form-label small fw-bold text-secondary">Lista actual</label>
+                    <div id="lista_pasajeros_editar">
+                        </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn btn-sm btn-success" onclick="guardarCambiosIntegrantes()">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+</div>
 <script>
     const detalleUrlBase = @json(url('/reservas'));
     let datosDetalleActual = null;
@@ -382,9 +421,44 @@
                 const fila = document.createElement('tr');
                 const nombreCompleto = (integrante.nombres + ' ' + integrante.apellidos).trim();
                 fila.innerHTML = `
-                    <td><strong>${nombreCompleto}</strong></td>
-                    <td>${integrante.email || '—'}</td>
-                    <td>${integrante.telefono || '—'}</td>
+                    <td class="editable-cell align-middle" onclick="activarEdicionRapida(this)">
+                        <div class="d-flex align-items-center">
+                            <span class="text-content fw-bold">${integrante.nombres}</span>
+                            <i class="bi bi-pencil-fill edit-icon ms-auto" style="font-size: 0.7rem; opacity: 0.5;"></i>
+                        </div>
+                        <input type="text" class="form-control form-control-sm d-none input-edit" 
+                            value="${integrante.nombres}" 
+                            onblur="finalizarEdicionRapida(this, 'nombres', ${integrante.id})">
+                    </td>
+
+                    <td class="editable-cell align-middle" onclick="activarEdicionRapida(this)">
+                        <div class="d-flex align-items-center">
+                            <span class="text-content">${integrante.apellidos}</span>
+                            <i class="bi bi-pencil-fill edit-icon ms-auto" style="font-size: 0.7rem; opacity: 0.5;"></i>
+                        </div>
+                        <input type="text" class="form-control form-control-sm d-none input-edit" 
+                            value="${integrante.apellidos}" 
+                            onblur="finalizarEdicionRapida(this, 'apellidos', ${integrante.id})">
+                    </td>
+                    <td class="editable-cell align-middle" onclick="activarEdicionRapida(this)">
+                        <div class="d-flex align-items-center">
+                            <span class="text-content">${integrante.email}</span>
+                            <i class="bi bi-pencil-fill edit-icon ms-auto" style="font-size: 0.7rem; opacity: 0.5;"></i>
+                        </div>
+                        <input type="text" class="form-control form-control-sm d-none input-edit" 
+                            value="${integrante.email}" 
+                            onblur="finalizarEdicionRapida(this, 'email', ${integrante.id})">
+                    </td>
+                    <td class="editable-cell align-middle" onclick="activarEdicionRapida(this)">
+                        <div class="d-flex align-items-center">
+                            <span class="text-content">${integrante.telefono}</span>
+                            <i class="bi bi-pencil-fill edit-icon ms-auto" style="font-size: 0.7rem; opacity: 0.5;"></i>
+                        </div>
+                        <input type="text" class="form-control form-control-sm d-none input-edit" 
+                            value="${integrante.telefono}" 
+                            onblur="finalizarEdicionRapida(this, 'telefono', ${integrante.id})">
+                    </td>
+                   
                     <td class="text-end">€${Number(integrante.monto_asignado).toFixed(2)}</td>
                     <td class="text-end">€${Number(integrante.pagado).toFixed(2)}</td>
                     <td class="text-end"><span class="badge ${integrante.deuda > 0 ? 'bg-danger' : 'bg-success'}">€${Number(integrante.deuda).toFixed(2)}</span></td>
@@ -579,6 +653,106 @@
         }
     });
     @endif
+
+    // ... debajo de tu función abrirModalCobrarReserva ...
+
+    function abrirGestionIntegrantes() {
+        // 1. Usamos los datos que ya cargó el modal de detalle para saber qué reserva es
+        if (!datosDetalleActual) return;
+
+        console.log("Gestionando integrantes de la reserva:", datosDetalleActual.id);
+        let modalDetalle = bootstrap.Modal.getInstance(document.getElementById('modalDetalleReserva'));
+        if (modalDetalle) {
+            modalDetalle.hide();
+        }
+        // 2. Aquí puedes limpiar o preparar la lista antes de mostrar el modal
+        // (Por ahora solo lo abrimos)
+        
+        var modalG = new bootstrap.Modal(document.getElementById('modalGestionIntegrantes'));
+        modalG.show();
+    }
+
+    function guardarCambiosIntegrantes() {
+        // Aquí irá la lógica para enviar los nuevos integrantes al servidor
+        alert("Enviando cambios para la reserva ID: " + datosDetalleActual.id);
+    }
+    
+    function activarEdicionRapida(td) {
+        const span = td.querySelector('.text-content');
+        const input = td.querySelector('.input-edit');
+        const icon = td.querySelector('.edit-icon');
+
+        if (input.classList.contains('d-none')) {
+            span.classList.add('d-none');
+            icon.classList.add('d-none');
+            input.classList.remove('d-none');
+            input.focus();
+        }
+    }
+
+    function finalizarEdicionRapida(input, campo, integranteId) {
+        const td = input.closest('td');
+        const span = td.querySelector('.text-content');
+        const icon = td.querySelector('.edit-icon');
+        const nuevoValor = input.value;
+        const valorAnterior = span.textContent.trim();
+
+        // si el valos no cambio , solo cerramos el modo edición
+        if(nuevoValor==valorAnterior){
+            input.classList.add('d-none');
+            span.classList.remove('d-none');
+            if(icon) icon.classList.remove('d-none');
+            return;
+        }
+        // Si el valor es vacío lo revertimos
+        if(nuevoValor==""&& campo!== 'telefono'){
+            alert('el campo no puede estar vacío');
+            input.value = valorAnterior;
+            input.classList.add('d-none');
+            span.classList.remove('d-none');
+            return;
+        }
+            
+        // 3. Petición AJAX al servidor
+        fetch(`/reservas/integrantes/${integranteId}/update-fast`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+                campo: campo,
+                valor: nuevoValor
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Actualización visual exitosa
+                span.textContent = nuevoValor;
+                
+                // Opcional: Una pequeña animación de éxito (destello verde)
+                td.style.backgroundColor = '#d4edda';
+                setTimeout(() => td.style.backgroundColor = '', 500);
+            } else {
+                // Error validado por Laravel (ej: email duplicado)
+                alert("Error: " + data.message);
+                input.value = valorAnterior;
+            }
+        })
+        .catch(error => {
+            console.error("Error en la petición:", error);
+            alert("No se pudo conectar con el servidor para guardar el cambio.");
+            input.value = valorAnterior;
+        })
+        .finally(() => {
+            // Siempre volvemos al estado visual normal
+            input.classList.add('d-none');
+            span.classList.remove('d-none');
+            if(icon) icon.classList.remove('d-none');
+        });
+    }
 </script>
 
 @endsection

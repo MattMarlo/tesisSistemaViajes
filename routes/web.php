@@ -58,6 +58,7 @@ Route::middleware('auth')->group(function() {
         Route::get('/', [ReservaController::class, 'index'])->name('reservas');
         Route::get('/{reserva}/detalle', [ReservaController::class, 'detalleJson'])->name('reservas.detalle');
         Route::put('/{reserva}', [ReservaController::class, 'update'])->name('reservas.update');
+        Route::put('/integrantes/{id}/update-fast', [ReservaController::class, 'updateIntegranteFast'])->name('integrantes.updateFast');
         Route::delete('/{reserva}', [ReservaController::class, 'destroy'])->name('reservas.destroy');
     });
 

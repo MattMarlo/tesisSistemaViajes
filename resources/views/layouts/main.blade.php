@@ -11,6 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 
     <style>
+
         :root {
             --sidebar-width: 280px;
             --sidebar-collapsed-width: 85px;
@@ -159,7 +160,28 @@
             border-top: 1px solid #e2e8f0;
             background: #fcfcfc;
         }
-
+        /*edición rapida en modal de detalle reserva grupal*/
+        .editable-cell {
+        position: relative;
+        cursor: pointer;
+        padding: 5px !important;
+        }
+        .editable-cell:hover {
+            background-color: rgba(59, 130, 246, 0.05); /* Un azul muy tenue */
+        }
+        .edit-icon {
+            visibility: hidden;
+            color: #3b82f6;
+            margin-left: 8px;
+        }
+        .editable-cell:hover .edit-icon {
+            visibility: visible;
+        }
+        .input-edit {
+            width: 100%;
+            border: 1px solid #3b82f6 !important;
+            font-weight: bold;
+        }
         /* Responsive */
         @media (max-width: 768px) {
             .sidebar { left: -100%; }
