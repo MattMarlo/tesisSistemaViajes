@@ -151,7 +151,7 @@ class ReservaService
     {
         return 'RES-' . strtoupper(substr(uniqid(), -6));
     }
-    private function calcularEstados($monto_depo, $precio_total)
+    public function calcularEstados($monto_depo, $precio_total)
     {
         if ($monto_depo <= 0) {
             return [

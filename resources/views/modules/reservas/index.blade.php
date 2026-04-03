@@ -322,26 +322,55 @@
 <div class="modal fade" id="modalGestionIntegrantes" tabindex="-1" aria-hidden="true" style="z-index: 1060;">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content shadow-lg border-0">
+            
             <div class="modal-header bg-dark text-white">
-                <h6 class="modal-title fw-bold"><i class="bi bi-people-fill me-2"></i>Gestionar Integrantes</h6>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <h6 class="modal-title fw-bold">
+                    <i class="bi bi-people-fill me-2"></i>Gestionar Integrantes
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
+
             <div class="modal-body">
-                <div id="contenedor_edicion_grupo">
-                    <label class="form-label small fw-bold text-secondary">Añadir nuevo integrante</label>
-                    <div class="input-group input-group-sm mb-3">
-                        <input type="text" class="form-control" placeholder="Buscar por nombre o DNI...">
-                        <button class="btn btn-primary" type="button">Buscar</button>
-                    </div>
-                    <hr>
-                    <label class="form-label small fw-bold text-secondary">Lista actual</label>
-                    <div id="lista_pasajeros_editar">
-                        </div>
+
+                <!-- 🔍 BUSCAR CLIENTE -->
+                <label class="form-label small fw-bold text-secondary">
+                    Buscar por cédula
+                </label>
+
+                <div class="input-group input-group-sm mb-3">
+                    <input 
+                        type="text" 
+                        id="input_buscar_cedula"
+                        class="form-control" 
+                        placeholder="Ej: 1801234567">
+                    
+                    <button class="btn btn-primary" type="button" onclick="buscarCliente()">
+                        Buscar
+                    </button>
                 </div>
+
+                <!-- RESULTADO -->
+                <div id="resultado_busqueda" class="mb-3"></div>
+
+                <hr>
+
+                <!-- 👥 LISTA ACTUAL -->
+                <label class="form-label small fw-bold text-secondary">
+                    Lista actual
+                </label>
+
+                <div id="lista_pasajeros_editar"></div>
+
             </div>
+
             <div class="modal-footer bg-light">
-                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cerrar</button>
-                <button type="button" class="btn btn-sm btn-success" onclick="guardarCambiosIntegrantes()">Guardar Cambios</button>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">
+                    Cerrar
+                </button>
+
+                <button type="button" class="btn btn-sm btn-success" onclick="guardarCambiosIntegrantes()">
+                    Guardar Cambios
+                </button>
             </div>
         </div>
     </div>
@@ -349,6 +378,8 @@
 <script>
     const detalleUrlBase = @json(url('/reservas'));
     let datosDetalleActual = null;
+    let integrantesEliminados=[];
+    let nuevosIntegrantes=[];
 
     function csrfToken() {
         return document.querySelector('meta[name="csrf-token"]').getAttribute('content');
@@ -458,8 +489,16 @@
                             value="${integrante.telefono}" 
                             onblur="finalizarEdicionRapida(this, 'telefono', ${integrante.id})">
                     </td>
-                   
-                    <td class="text-end">€${Number(integrante.monto_asignado).toFixed(2)}</td>
+                    <td class="editable-cell align-middle" onclick="activarEdicionRapida(this)">
+                        <div class="d-flex align-items-center">
+                            <span class="text-content">€${Number(integrante.monto_asignado).toFixed(2)}</span>
+                            <i class="bi bi-pencil-fill edit-icon ms-auto" style="font-size: 0.7rem; opacity: 0.5;"></i>
+                        </div>
+                        <input type="text" class="form-control form-control-sm d-none input-edit" 
+                            value="${Number(integrante.monto_asignado).toFixed(2)}" 
+                            onblur="finalizarEdicionRapida(this, 'monto_asignado', ${integrante.id})">
+                    </td>
+                    
                     <td class="text-end">€${Number(integrante.pagado).toFixed(2)}</td>
                     <td class="text-end"><span class="badge ${integrante.deuda > 0 ? 'bg-danger' : 'bg-success'}">€${Number(integrante.deuda).toFixed(2)}</span></td>
                     <td class="text-center"><small>${integrante.es_lider ? '<span class="badge bg-dark">Líder</span>' : '—'}</small></td>
@@ -659,17 +698,39 @@
     function abrirGestionIntegrantes() {
         // 1. Usamos los datos que ya cargó el modal de detalle para saber qué reserva es
         if (!datosDetalleActual) return;
-
-        console.log("Gestionando integrantes de la reserva:", datosDetalleActual.id);
+        integrantesEliminados=[];
+        nuevosIntegrantes=[];
+        //console.log("Gestionando integrantes de la reserva:", datosDetalleActual.id);
         let modalDetalle = bootstrap.Modal.getInstance(document.getElementById('modalDetalleReserva'));
         if (modalDetalle) {
             modalDetalle.hide();
         }
-        // 2. Aquí puedes limpiar o preparar la lista antes de mostrar el modal
-        // (Por ahora solo lo abrimos)
+        renderListaIntegrantes();
         
         var modalG = new bootstrap.Modal(document.getElementById('modalGestionIntegrantes'));
         modalG.show();
+    }
+    function renderListaIntegrantes() {
+        const cont = document.getElementById('lista_pasajeros_editar');
+        cont.innerHTML = '';
+
+        datosDetalleActual.integrantes.forEach(i => {
+            const div = document.createElement('div');
+            div.className = "d-flex justify-content-between align-items-center border rounded p-2 mb-2";
+
+            div.innerHTML = `
+                <div>
+                    <strong>${i.nombres} ${i.apellidos}</strong><br>
+                    <small class="text-muted">${i.email || ''}</small>
+                </div>
+
+                <button class="btn btn-sm btn-danger" onclick="quitarIntegrante(${i.id})">
+                    Quitar
+                </button>
+            `;
+
+            cont.appendChild(div);
+        });
     }
 
     function guardarCambiosIntegrantes() {
@@ -695,7 +756,12 @@
         const span = td.querySelector('.text-content');
         const icon = td.querySelector('.edit-icon');
         const nuevoValor = input.value;
-        const valorAnterior = span.textContent.trim();
+        let valorAnterior = span.textContent.trim();
+
+        // Para campos monetarios, remover el símbolo € antes de comparar
+        if (campo === 'monto_asignado') {
+            valorAnterior = valorAnterior.replace('€', '').trim();
+        }
 
         // si el valos no cambio , solo cerramos el modo edición
         if(nuevoValor==valorAnterior){
@@ -723,14 +789,19 @@
             },
             body: JSON.stringify({
                 campo: campo,
-                valor: nuevoValor
+                valor: nuevoValor,
+                reserva_id: datosDetalleActual.id
             })
         })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
                 // Actualización visual exitosa
-                span.textContent = nuevoValor;
+                if (campo === 'monto_asignado') {
+                    span.textContent = '€' + Number(nuevoValor).toFixed(2);
+                } else {
+                    span.textContent = nuevoValor;
+                }
                 
                 // Opcional: Una pequeña animación de éxito (destello verde)
                 td.style.backgroundColor = '#d4edda';

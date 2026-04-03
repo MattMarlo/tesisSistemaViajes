@@ -6,14 +6,16 @@ use App\Models\Destino;
 use App\Models\Reserva;
 use App\Models\Cliente;
 use App\Services\PagoService;
+use App\Services\ReservaService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class ReservaController extends Controller
 {
-    public function __construct(protected PagoService $pagoService)
+    public function __construct(protected PagoService $pagoService , protected ReservaService $reservaService)
     {
     }
+    
     /**
      * Display a listing of the resource.
      */
@@ -299,16 +301,83 @@ class ReservaController extends Controller
     public function updateIntegranteFast(Request $request ,$id ){
         // 1. VALIDACIÓN: Solo permitimos los campos reales de tu migración 'clientes'
         $request->validate([
-            'campo' => 'required|in:nombres,apellidos,email,telefono',
-            'valor' => 'required|string|max:250'
+            'campo' => 'required|in:nombres,apellidos,email,telefono,monto_asignado',
+            'valor' => 'required|max:250',
+            'reserva_id' => 'required|integer|exists:reservas,id'
         ]);
 
         try {
-            // 2. BUSCAR: Localizamos al cliente por el ID enviado desde el JS
+            $campo = $request->campo;
+            
+            // 2. Si es monto_asignado, actualizar en grupos_clientes
+            if ($campo === 'monto_asignado') {
+                // Validar que sea numérico
+                if (!is_numeric($request->valor) || $request->valor < 0) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'El monto debe ser un valor numérico válido.'
+                    ], 422);
+                }
+
+                // Obtener el grupo de la reserva
+                $reserva = Reserva::with('reservaGrupo.grupo')->findOrFail($request->reserva_id);
+                if (!$reserva->reservaGrupo || !$reserva->reservaGrupo->grupo) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Reserva grupal no encontrada.'
+                    ], 422);
+                }
+
+                // Actualizar monto en grupos_clientes
+                $grupoCliente = DB::table('grupos_clientes')
+                    ->where('grupo_id', $reserva->reservaGrupo->grupo_id)
+                    ->where('cliente_id', $id)
+                    ->first();
+
+                if (!$grupoCliente) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Integrante no encontrado en el grupo.'
+                    ], 404);
+                }
+
+                DB::table('grupos_clientes')
+                    ->where('grupo_id', $reserva->reservaGrupo->grupo_id)
+                    ->where('cliente_id', $id)
+                    ->update(['monto_asignado' => $request->valor]);
+
+                //  Mantener precio_total_viaje consistente con suma de montos asignados del grupo
+                $nuevoTotalViaje = DB::table('grupos_clientes')
+                    ->where('grupo_id', $reserva->reservaGrupo->grupo_id)
+                    ->sum('monto_asignado');
+                //usar la funcion para actualizar estados
+                $totalDepositado = DB::table('pagos')
+                    ->where('reserva_id', $reserva->id)
+                    ->sum('monto_depositado');
+                $estados = $this->pagoService->sincronizarEstadoPagoReserva(
+                        (int) $request->reserva_id
+                );
+                //$estados = $this->reservaService->calcularEstados(
+                    //$totalDepositado,
+                   // $nuevoTotalViaje
+                //);
+
+                //$reserva->estado = $estados['estado_reserva'];
+                //$reserva->estado_pago = $estados['estado_pago'];
+                $reserva->precio_total_viaje = $nuevoTotalViaje;
+                $reserva->save();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => '¡Monto actualizado correctamente!' 
+                ]);
+            }
+
+            // 3. BUSCAR: Localizamos al cliente por el ID enviado desde el JS
             $cliente = Cliente::findOrFail($id);
             
-            // 3. REGLA ESPECIAL PARA EMAIL: Evitar duplicados
-            if ($request->campo === 'email') {
+            // 4. REGLA ESPECIAL PARA EMAIL: Evitar duplicados
+            if ($campo === 'email') {
                 $existe = Cliente::where('email', $request->valor)
                                 ->where('id', '!=', $id)
                                 ->exists();
@@ -320,10 +389,9 @@ class ReservaController extends Controller
                 }
             }
 
-            // 4. GUARDADO DINÁMICO: 
+            // 5. GUARDADO DINÁMICO PARA CAMPOS DE CLIENTE: 
             // Si $request->campo es 'nombres', esto hace: $cliente->nombres = 'valor'
-            $columna = $request->campo;
-            $cliente->$columna = $request->valor;
+            $cliente->$campo = $request->valor;
             $cliente->save();
 
             return response()->json([
@@ -336,11 +404,6 @@ class ReservaController extends Controller
                 'success' => false,
                 'message' => 'No se encontró el registro del integrante.'
             ], 404);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Error en el servidor: ' . $e->getMessage()
-            ], 500);
-        }
+        } 
     }
 }
