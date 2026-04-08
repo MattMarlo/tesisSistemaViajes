@@ -37,6 +37,7 @@ Route::middleware('auth')->group(function() {
         Route::delete('/destroy/{id}', [ClienteController::class, 'destroy'])->name('clientes.destroy');
         Route::get('/edit/{id}', [ClienteController::class, 'edit'])->name('clientes.edit');
         Route::put('/update/{id}', [ClienteController::class, 'update'])->name('clientes.update');
+        Route::get('/buscar-cedula', [ClienteController::class, 'buscarPorDocumento'])->name('clientes.buscarDocumento');
     });
     Route::prefix('destinos')->group(function() {
         Route::get('/', [DestinoController::class, 'index'])->name('destinos');
@@ -57,6 +58,7 @@ Route::middleware('auth')->group(function() {
     Route::prefix('reservas')->group(function () {
         Route::get('/', [ReservaController::class, 'index'])->name('reservas');
         Route::get('/{reserva}/detalle', [ReservaController::class, 'detalleJson'])->name('reservas.detalle');
+        Route::post('/{reserva}/integrantes/guardar', [ReservaController::class, 'guardarIntegrantes'])->name('reservas.integrantes.guardar');
         Route::put('/{reserva}', [ReservaController::class, 'update'])->name('reservas.update');
         Route::put('/integrantes/{id}/update-fast', [ReservaController::class, 'updateIntegranteFast'])->name('integrantes.updateFast');
         Route::delete('/{reserva}', [ReservaController::class, 'destroy'])->name('reservas.destroy');

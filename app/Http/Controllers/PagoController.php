@@ -198,6 +198,9 @@ class PagoController extends Controller
                 (int) $request->cliente_id,
                 $request->only(['nombres', 'apellidos', 'monto_asignado'])
             );
+
+            // Asegurar que el estado de la reserva se sincronice también en caso de cambios de monto
+            $this->pagoService->sincronizarEstadoPagoReserva((int) $request->reserva_id);
         } catch (\InvalidArgumentException $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }

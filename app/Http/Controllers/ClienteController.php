@@ -84,6 +84,34 @@ class ClienteController extends Controller
         }
     }
 
+    public function buscarPorDocumento(Request $request)
+    {
+        $request->validate([
+            'documento' => 'required|string|max:50',
+        ]);
+
+        $cliente = Cliente::where('documento', $request->documento)->first();
+
+        if (!$cliente) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No se encontró ningún cliente con esa cédula.'
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $cliente->id,
+                'nombres' => $cliente->nombres ?? $cliente->nombre,
+                'apellidos' => $cliente->apellidos ?? $cliente->apellido,
+                'email' => $cliente->email,
+                'telefono' => $cliente->telefono,
+                'documento' => $cliente->documento,
+            ]
+        ]);
+    }
+
     /**
      * Remove the specified resource from storage.
      */

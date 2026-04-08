@@ -59,7 +59,7 @@
                 </thead>
                 <tbody>
                     @forelse($reservas as $res)
-                    <tr>
+                    <tr data-reserva-id="{{ $res->id }}">
                         <td class="fw-bold">{{ $res->id }}</td>
                         <td class="fw-bold">{{ $res->codigo_reserva }}</td>
                         @if ($res->tipo=='grupal')
@@ -71,9 +71,9 @@
                         <td><span class="badge bg-secondary">{{ $res->pais }}</span></td>
                         <td><span class="text-capitalize">{{ $res->tipo }}</span></td>
                         <td>{{ \Carbon\Carbon::parse($res->fecha_viaje)->format('d/m/Y') }}</td>
-                        <td class="text-success fw-bold">€{{ number_format($res->precio_total_viaje, 2) }}</td>
-                        <td><span class="text-capitalize">{{ $res->estado }}</span></td>
-                        <td>
+                        <td class="text-success fw-bold precio-total">€{{ number_format($res->precio_total_viaje, 2) }}</td>
+                        <td class="estado-reserva"><span class="text-capitalize">{{ $res->estado }}</span></td>
+                        <td class="estado-pago">
                             @if($res->estado_pago == 'pagado')
                                 <span class="badge bg-success">Completado</span>
                             @elseif($res->estado_pago == 'parcial')
@@ -377,6 +377,7 @@
 </div>
 <script>
     const detalleUrlBase = @json(url('/reservas'));
+    const clientesBuscarUrl = @json(route('clientes.buscarDocumento'));
     let datosDetalleActual = null;
     let integrantesEliminados=[];
     let nuevosIntegrantes=[];
@@ -390,6 +391,36 @@
         if (e === 'confirmada') return '<span class="badge bg-success">Confirmada</span>';
         if (e === 'cancelada') return '<span class="badge" style="background:#ef4444;">Cancelada</span>';
         return '<span class="badge bg-warning text-dark">Pendiente</span>';
+    }
+
+    function actualizarFilaReserva(detalle) {
+        const fila = document.querySelector('tr[data-reserva-id="' + detalle.id + '"]');
+        if (!fila) return;
+
+        const precioCelda = fila.querySelector('.precio-total');
+        const estadoCelda = fila.querySelector('.estado-reserva span');
+        const pagoCelda = fila.querySelector('.estado-pago');
+
+        if (precioCelda && detalle.precio_total_viaje !== undefined) {
+            precioCelda.textContent = '€' + Number(detalle.precio_total_viaje).toFixed(2);
+        }
+
+        if (estadoCelda && detalle.estado !== undefined) {
+            estadoCelda.textContent = (detalle.estado || '').charAt(0).toUpperCase() + (detalle.estado || '').slice(1);
+        }
+
+        if (pagoCelda && detalle.estado_pago !== undefined) {
+            let html = '';
+            if (detalle.estado_pago === 'pagado') {
+                html = '<span class="badge bg-success">Completado</span>';
+            } else if (detalle.estado_pago === 'parcial') {
+                const total = Number(detalle.total_depositado || 0).toFixed(2);
+                html = '<span class="badge bg-warning text-dark">Parcial: ' + total + '</span>';
+            } else {
+                html = '<span class="badge bg-danger">Pendiente</span>';
+            }
+            pagoCelda.innerHTML = html;
+        }
     }
 
     function abrirModalDetalleReserva(id) {
@@ -426,6 +457,9 @@
         document.getElementById('detalle_fecha_viaje_txt').textContent = fmtFecha(d.fecha_viaje);
         document.getElementById('detalle_precio_txt').textContent = '€' + Number(d.precio_total_viaje).toFixed(2);
         document.getElementById('detalle_itinerario').textContent = d.itinerario_resumen || '';
+
+        // Si el detalle se actualiza (edición rápida), sincronizar la fila correspondiente de la tabla
+        actualizarFilaReserva(d);
 
         const gl = document.getElementById('detalle_grupo_linea');
         if (d.tipo === 'grupal' && d.grupo_nombre) {
@@ -695,47 +729,218 @@
 
     // ... debajo de tu función abrirModalCobrarReserva ...
 
+    function buscarCliente() {
+        const documento = document.getElementById('input_buscar_cedula').value.trim();
+        const resultado = document.getElementById('resultado_busqueda');
+        resultado.innerHTML = '';
+
+        if (!documento) {
+            resultado.innerHTML = '<div class="alert alert-warning py-2 mb-0">Ingrese una cédula para buscar el cliente.</div>';
+            return;
+        }
+
+        fetch(clientesBuscarUrl + '?documento=' + encodeURIComponent(documento), {
+            headers: {
+                'Accept': 'application/json'
+            }
+        })
+        .then(response => response.json().then(data => ({ ok: response.ok, data })))
+        .then(({ ok, data }) => {
+            if (!ok || !data.success) {
+                resultado.innerHTML = '<div class="alert alert-danger py-2 mb-0">' + (data.message || 'Cliente no encontrado.') + '</div>';
+                return;
+            }
+
+            const cliente = data.data;
+            const existente = datosDetalleActual.integrantes.some(i => i.id === cliente.id);
+            const disabled = existente ? 'disabled' : '';
+            const textoExistente = existente ? '<div class="small text-danger">Este cliente ya forma parte del grupo.</div>' : '';
+
+            resultado.innerHTML = `
+                <div class="border rounded p-3 bg-white">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <strong>${cliente.nombres} ${cliente.apellidos}</strong><br>
+                            <span class="text-muted">${cliente.email || 'Sin email'}</span>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-success" ${disabled} onclick="agregarIntegranteEncontrado(${cliente.id})">
+                            Añadir al grupo
+                        </button>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">Monto asignado (€)</label>
+                        <input id="monto_asignado_nuevo" type="number" step="0.01" min="0" class="form-control form-control-sm" value="0.00">
+                    </div>
+                    ${textoExistente}
+                </div>
+            `;
+
+            window.buscarClienteUltimo = cliente;
+        })
+        .catch(() => {
+            resultado.innerHTML = '<div class="alert alert-danger py-2 mb-0">Error al buscar cliente, intente nuevamente.</div>';
+        });
+    }
+
+    function agregarIntegranteEncontrado(clienteId) {
+        const cliente = window.buscarClienteUltimo;
+        if (!cliente || cliente.id !== clienteId) {
+            alert('Error interno al agregar cliente. Vuelva a buscar.');
+            return;
+        }
+
+        if (datosDetalleActual.integrantes.some(i => i.id === cliente.id)) {
+            alert('Este cliente ya está en la lista actual de integrantes.');
+            return;
+        }
+
+        const montoInput = document.getElementById('monto_asignado_nuevo');
+        const monto = parseFloat(montoInput.value || '0');
+        if (Number.isNaN(monto) || monto < 0) {
+            alert('Ingrese un monto asignado válido.');
+            return;
+        }
+
+        nuevosIntegrantes.push({
+            cliente_id: cliente.id,
+            monto_asignado: monto,
+        });
+
+        datosDetalleActual.integrantes.push({
+            id: cliente.id,
+            nombres: cliente.nombres,
+            apellidos: cliente.apellidos,
+            email: cliente.email,
+            telefono: cliente.telefono,
+            monto_asignado: monto,
+            pagado: 0,
+            deuda: monto,
+            es_lider: false,
+            es_nuevo: true,
+        });
+
+        document.getElementById('resultado_busqueda').innerHTML = '<div class="alert alert-success py-2 mb-0">Cliente agregado temporalmente. Presiona Guardar Cambios.</div>';
+        renderListaIntegrantes();
+    }
+
     function abrirGestionIntegrantes() {
-        // 1. Usamos los datos que ya cargó el modal de detalle para saber qué reserva es
         if (!datosDetalleActual) return;
         integrantesEliminados=[];
         nuevosIntegrantes=[];
-        //console.log("Gestionando integrantes de la reserva:", datosDetalleActual.id);
+
         let modalDetalle = bootstrap.Modal.getInstance(document.getElementById('modalDetalleReserva'));
         if (modalDetalle) {
             modalDetalle.hide();
         }
+
         renderListaIntegrantes();
-        
         var modalG = new bootstrap.Modal(document.getElementById('modalGestionIntegrantes'));
         modalG.show();
     }
+
     function renderListaIntegrantes() {
         const cont = document.getElementById('lista_pasajeros_editar');
         cont.innerHTML = '';
 
         datosDetalleActual.integrantes.forEach(i => {
+            const esNuevo = !!i.es_nuevo;
+            const badge = esNuevo ? '<span class="badge bg-success me-2">Nuevo</span>' : '';
+            const deuda = i.deuda !== undefined ? Number(i.deuda).toFixed(2) : '0.00';
+            const asignado = i.monto_asignado !== undefined ? Number(i.monto_asignado).toFixed(2) : '0.00';
+
             const div = document.createElement('div');
             div.className = "d-flex justify-content-between align-items-center border rounded p-2 mb-2";
-
             div.innerHTML = `
                 <div>
-                    <strong>${i.nombres} ${i.apellidos}</strong><br>
-                    <small class="text-muted">${i.email || ''}</small>
+                    ${badge}<strong>${i.nombres} ${i.apellidos}</strong><br>
+                    <small class="text-muted">${i.email || 'Sin email'}</small><br>
+                    <small class="text-muted">Asignado: €${asignado} · Deuda: €${deuda}</small>
                 </div>
-
                 <button class="btn btn-sm btn-danger" onclick="quitarIntegrante(${i.id})">
                     Quitar
                 </button>
             `;
-
             cont.appendChild(div);
         });
+
+        if (datosDetalleActual.integrantes.length === 0) {
+            cont.innerHTML = '<div class="alert alert-secondary py-2 mb-0">No hay integrantes registrados para esta reserva.</div>';
+        }
+    }
+
+    function quitarIntegrante(clienteId) {
+        const index = datosDetalleActual.integrantes.findIndex(i => i.id === clienteId);
+        if (index === -1) return;
+
+        const integrante = datosDetalleActual.integrantes[index];
+
+        if (integrante.es_nuevo) {
+            nuevosIntegrantes = nuevosIntegrantes.filter(i => i.cliente_id !== clienteId);
+        } else {
+            if (!integrantesEliminados.includes(clienteId)) {
+                integrantesEliminados.push(clienteId);
+            }
+        }
+
+        datosDetalleActual.integrantes.splice(index, 1);
+        renderListaIntegrantes();
     }
 
     function guardarCambiosIntegrantes() {
-        // Aquí irá la lógica para enviar los nuevos integrantes al servidor
-        alert("Enviando cambios para la reserva ID: " + datosDetalleActual.id);
+        if (!datosDetalleActual) {
+            alert('No se encontró la reserva para gestionar integrantes.');
+            return;
+        }
+
+        if (nuevosIntegrantes.length === 0 && integrantesEliminados.length === 0) {
+            alert('No hay cambios pendientes en los integrantes.');
+            return;
+        }
+
+        const payload = {
+            reserva_id: datosDetalleActual.id,
+            nuevos_integrantes: nuevosIntegrantes,
+            integrantes_eliminados: integrantesEliminados
+        };
+
+        fetch(detalleUrlBase + '/' + datosDetalleActual.id + '/integrantes/guardar', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify(payload),
+        })
+        .then(response => response.json().then(data => ({ ok: response.ok, data })))
+        .then(({ ok, data }) => {
+            if (!ok || !data.success) {
+                alert(data.message || 'No se pudo guardar la lista de integrantes.');
+                return;
+            }
+
+            alert('Cambios guardados correctamente.');
+            nuevosIntegrantes = [];
+            integrantesEliminados = [];
+
+            fetch(detalleUrlBase + '/' + datosDetalleActual.id + '/detalle', { headers: { 'Accept': 'application/json' } })
+                .then(r => r.json())
+                .then(json => {
+                    if (json.success) {
+                        datosDetalleActual = json.data;
+                        poblarModalDetalle(json.data);
+                    }
+                })
+                .catch(() => {
+                    window.location.reload();
+                });
+
+            const modalG = bootstrap.Modal.getInstance(document.getElementById('modalGestionIntegrantes'));
+            if (modalG) modalG.hide();
+        })
+        .catch(() => {
+            alert('Error de red al guardar los cambios de integrantes.');
+        });
     }
     
     function activarEdicionRapida(td) {
@@ -799,10 +1004,25 @@
                 // Actualización visual exitosa
                 if (campo === 'monto_asignado') {
                     span.textContent = '€' + Number(nuevoValor).toFixed(2);
+
+                    // Refrescar datos del detalle en el modal SIN cerrar/reabrir el modal.
+                    if (datosDetalleActual && datosDetalleActual.id) {
+                        fetch(detalleUrlBase + '/' + datosDetalleActual.id + '/detalle', { headers: { 'Accept': 'application/json' } })
+                            .then(r => r.json())
+                            .then(json => {
+                                if (json.success) {
+                                    datosDetalleActual = json.data;
+                                    poblarModalDetalle(json.data);
+                                }
+                            })
+                            .catch(() => {
+                                // ignore, ya tenemos al menos el monto visualmente actualizado.
+                            });
+                    }
                 } else {
                     span.textContent = nuevoValor;
                 }
-                
+
                 // Opcional: Una pequeña animación de éxito (destello verde)
                 td.style.backgroundColor = '#d4edda';
                 setTimeout(() => td.style.backgroundColor = '', 500);

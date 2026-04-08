@@ -116,11 +116,11 @@ class ReservaController extends Controller
      * Remove the specified resource from storage.
      * 
      * LÓGICA DE NEGOCIO:
-     * ✅ PERMITIR eliminar SI:
+     *  PERMITIR eliminar SI:
      *    - Estado es "pendiente" Y NO hay pagos
      *    - Estado es "cancelada" Y NO hay pagos
      * 
-     * ❌ NO permitir eliminar SI:
+     *  NO permitir eliminar SI:
      *    - Hay pagos registrados (anularlos primero)
      *    - Estado es "confirmada" (cancelar primero)
      */
@@ -128,7 +128,7 @@ class ReservaController extends Controller
     {
         $reserva = Reserva::findOrFail($id);
 
-        // Verificación 1: ¿Hay pagos registrados?
+        // Verificación 1: Hay pagos registrados?
         $totalPagos = DB::table('pagos')->where('reserva_id', $reserva->id)->sum('monto_depositado');
         if ($totalPagos > 0) {
             $msg = 'No se puede eliminar: existen pagos por €'.number_format($totalPagos, 2).' registrados. Debe anularlos primero en el módulo de Pagos.';
@@ -298,6 +298,128 @@ class ReservaController extends Controller
 
         return redirect()->route('reservas')->with('success', 'Reserva actualizada correctamente.');
     }
+
+    public function guardarIntegrantes(Request $request, string $reservaId)
+    {
+        $request->validate([
+            'reserva_id'            => 'required|integer|exists:reservas,id',
+            'nuevos_integrantes'    => 'nullable|array',
+            'nuevos_integrantes.*.cliente_id' => 'required_with:nuevos_integrantes|integer|exists:clientes,id',
+            'nuevos_integrantes.*.monto_asignado' => 'required_with:nuevos_integrantes|numeric|min:0',
+            'integrantes_eliminados' => 'nullable|array',
+            'integrantes_eliminados.*' => 'integer|exists:clientes,id',
+        ]);
+
+        $reserva = Reserva::with('reservaGrupo.grupo')->findOrFail($reservaId);
+        if ($reserva->tipo !== 'grupal' || !$reserva->reservaGrupo || !$reserva->reservaGrupo->grupo) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La reserva no corresponde a un grupo válido.'
+            ], 422);
+        }
+
+        $grupoId = $reserva->reservaGrupo->grupo_id;
+        $actuales = DB::table('grupos_clientes')
+            ->where('grupo_id', $grupoId)
+            ->pluck('cliente_id')
+            ->toArray();
+
+        $nuevos = $request->input('nuevos_integrantes', []);
+        $eliminados = $request->input('integrantes_eliminados', []);
+
+        DB::beginTransaction();
+        try {
+            if (!empty($eliminados)) {
+                foreach ($eliminados as $clienteId) {
+                    if (!in_array($clienteId, $actuales, true)) {
+                        continue;
+                    }
+
+                    $grupoCliente = DB::table('grupos_clientes')
+                        ->where('grupo_id', $grupoId)
+                        ->where('cliente_id', $clienteId)
+                        ->first();
+
+                    if ($grupoCliente && $grupoCliente->es_lider) {
+                        DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'No se puede quitar al líder del grupo. Debe cambiar el líder antes de eliminarlo.'
+                        ], 422);
+                    }
+
+                    $tienePagos = DB::table('pagos')
+                        ->where('reserva_id', $reserva->id)
+                        ->where('cliente_id', $clienteId)
+                        ->exists();
+
+                    if ($tienePagos) {
+                        DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'No se puede quitar el integrante porque tiene pagos registrados.'
+                        ], 422);
+                    }
+                }
+
+                DB::table('grupos_clientes')
+                    ->where('grupo_id', $grupoId)
+                    ->whereIn('cliente_id', $eliminados)
+                    ->delete();
+            }
+
+            if (!empty($nuevos)) {
+                foreach ($nuevos as $integrante) {
+                    $clienteId = (int) $integrante['cliente_id'];
+                    $montoAsignado = (float) $integrante['monto_asignado'];
+
+                    if (in_array($clienteId, $actuales, true)) {
+                        continue;
+                    }
+
+                    $clienteExiste = Cliente::where('id', $clienteId)->exists();
+                    if (!$clienteExiste) {
+                        DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'El cliente solicitado no existe.'
+                        ], 422);
+                    }
+
+                    DB::table('grupos_clientes')->insert([
+                        'grupo_id' => $grupoId,
+                        'cliente_id' => $clienteId,
+                        'monto_asignado' => $montoAsignado,
+                        'es_lider' => false,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+
+            $nuevoTotal = DB::table('grupos_clientes')
+                ->where('grupo_id', $grupoId)
+                ->sum('monto_asignado');
+
+            $reserva->precio_total_viaje = $nuevoTotal;
+            $reserva->save();
+            $this->pagoService->sincronizarEstadoPagoReserva($reserva->id);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cambios en integrantes guardados correctamente.'
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al guardar los cambios: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function updateIntegranteFast(Request $request ,$id ){
         // 1. VALIDACIÓN: Solo permitimos los campos reales de tu migración 'clientes'
         $request->validate([
@@ -346,30 +468,26 @@ class ReservaController extends Controller
                     ->where('cliente_id', $id)
                     ->update(['monto_asignado' => $request->valor]);
 
-                //  Mantener precio_total_viaje consistente con suma de montos asignados del grupo
+                // Mantener precio_total_viaje consistente con suma de montos asignados del grupo
                 $nuevoTotalViaje = DB::table('grupos_clientes')
                     ->where('grupo_id', $reserva->reservaGrupo->grupo_id)
                     ->sum('monto_asignado');
-                //usar la funcion para actualizar estados
-                $totalDepositado = DB::table('pagos')
-                    ->where('reserva_id', $reserva->id)
-                    ->sum('monto_depositado');
-                $estados = $this->pagoService->sincronizarEstadoPagoReserva(
-                        (int) $request->reserva_id
-                );
-                //$estados = $this->reservaService->calcularEstados(
-                    //$totalDepositado,
-                   // $nuevoTotalViaje
-                //);
 
-                //$reserva->estado = $estados['estado_reserva'];
-                //$reserva->estado_pago = $estados['estado_pago'];
                 $reserva->precio_total_viaje = $nuevoTotalViaje;
                 $reserva->save();
 
+                // Sincronizar estados después de cambiar el precio total del viaje
+                $this->pagoService->sincronizarEstadoPagoReserva($reserva->id);
+
+                // Recargar reserva para estados actualizados
+                $reserva->refresh();
+
                 return response()->json([
                     'success' => true,
-                    'message' => '¡Monto actualizado correctamente!' 
+                    'message' => '¡Monto actualizado correctamente!',
+                    'estado' => $reserva->estado,
+                    'estado_pago' => $reserva->estado_pago,
+                    'precio_total_viaje' => (float) $reserva->precio_total_viaje
                 ]);
             }
 

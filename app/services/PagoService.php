@@ -264,5 +264,17 @@ class PagoService
             ->where('grupo_id', $grupoId)
             ->where('cliente_id', $clienteId)
             ->update(['monto_asignado' => $datos['monto_asignado']]);
+
+        // Sincronizar el precio total de la reserva usando los montos asignados actualizados
+        $totalAsignado = DB::table('grupos_clientes')
+            ->where('grupo_id', $grupoId)
+            ->sum('monto_asignado');
+
+        $reserva = Reserva::findOrFail($reservaId);
+        $reserva->precio_total_viaje = $totalAsignado;
+        $reserva->save();
+
+        // Recalcular estados de pago y reserva luego de ajuste en monto asignado
+        $this->sincronizarEstadoPagoReserva($reservaId);
     }
 }
